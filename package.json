@@ -1,0 +1,79 @@
+{
+  "name": "RNet",
+  "version": "4.0.0",
+  "homepage": "https://github.com/ReadOnlyNet/RNet",
+  "author": {
+    "name": "ROMVoid95",
+    "email": "romvoid95@readonlydev.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ReadOnlyNet/RNet.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ReadOnlyNet/RNet/issues"
+  },
+  "private": true,
+  "scripts": {
+    "start": "node src/start.js"
+  },
+  "main": "src/index.js",
+  "typings": "src/index.d.ts",
+  "engines": {
+    "node": ">=6.0.0"
+  },
+  "engineStrict": true,
+  "dependencies": {
+    "@rnet.cf/customcommands": "^1.1.0",
+    "@rnet.cf/datafactory": "^1.4.3",
+    "@rnet.cf/rnet-core": "^1.3.0",
+    "@rnet.cf/eris": "0.8.18",
+    "async-each": "^1.0.1",
+    "axios": "^0.17.1",
+    "blocked": "^1.2.1",
+    "bluebird": "^3.4.1",
+    "bufferutil": ">=1.2.1",
+    "cli-progress": "^3.1.0",
+    "config": "^1.29.4",
+    "dot-object": "^1.9.0",
+    "envkey": "^1.2.7",
+    "eventemitter3": "^2.0.2",
+    "express": "^4.16.4",
+    "glob": "^7.1.2",
+    "glob-promise": "^3.1.0",
+    "google": "^2.1.0",
+    "hot-shots": "^4.3.1",
+    "ioredis": "^3.2.1",
+    "ioredis-lock": "^3.4.0",
+    "jayson": "^3.0.2",
+    "js-yaml": "^3.10.0",
+    "matomo-tracker": "^2.2.0",
+    "minimatch": "^3.0.4",
+    "moment": "^2.13.0",
+    "moment-duration-format": "^1.3.0",
+    "mongoose_schema-json": "^1.0.3",
+    "node-oom-heapdump": "^1.1.4",
+    "pidusage": "^1.1.0",
+    "prom-client": "^11.3.0",
+    "raven": "^1.1.1",
+    "snowtransfer": "^0.2.1",
+    "uuid": "^3.3.2",
+    "winston": "github:briantanner/winston",
+    "zlib-sync": "^0.1.5"
+  },
+  "devDependencies": {
+    "eslint": "^3.5.0",
+    "gulp": "^3.9.1",
+    "gulp-eslint": "^3.0.1",
+    "longjohn": "^0.2.12"
+  },
+  "optionalDependencies": {
+    "@rnet.cf/automod": "^1.3.5",
+    "@rnet.cf/autoroles": "^1.1.5",
+    "@rnet.cf/fun": "0.3.3",
+    "@rnet.cf/manager": "^1.0.11",
+    "@rnet.cf/moderation": "^1.3.8",
+    "@rnet.cf/modules": "^1.5.6",
+    "@rnet.cf/music": "^4.4.0"
+  }
+}
