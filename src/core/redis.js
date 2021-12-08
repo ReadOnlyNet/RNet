@@ -15,8 +15,13 @@ async function connect() {
 			],
 		});
 
+		let errorCount = 0;
+
 		const rejectFunc = (err) => {
-			reject(err);
+			errorCount += 1;
+			if(errorCount >= 50) {
+				process.exit(1);
+			}
 		};
 
 		client.on('ready', () => {
@@ -25,7 +30,7 @@ async function connect() {
 			resolve(client);
 		});
 
-		client.once('error', rejectFunc);
+		client.on('error', rejectFunc);
 
 		client.on('error', err => {
 			logger.error(err);

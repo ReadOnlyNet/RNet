@@ -46,6 +46,7 @@ class RemoteDebug extends Command {
 
 			client.request('debug', { token: this.config.rpcToken, code: codeArr.join(' ') }, (err, response) => {
 				if (err) {
+					this.logger.error(err);
 					return this.error(message.channel, `Something went wrong.`);
 				}
 

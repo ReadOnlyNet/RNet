@@ -27,6 +27,7 @@ const RPCServer = require('./RPCServer');
 const RPCClient = require('./RPCClient');
 const { Client } = require('./rpc');
 const prom = require('prom-client');
+const Endpoints = require('@rnet.cf/eris/lib/rest/Endpoints');
 
 
 var EventEmitter;
@@ -233,6 +234,8 @@ class RNet {
 		// create the discord client
 		const token = this.config.isPremium ? config.client.token : this.globalConfig.prodToken || config.client.token;
 
+		this.hookEris();
+
 		this._client = new Eris(token, config.clientOptions);
 		this._restClient = new Eris(`Bot ${token}`, options.restClient);
 
@@ -304,15 +307,11 @@ class RNet {
 			guildCreateTimeout: 2000,
 			largeThreshold: 50,
 			defaultImageFormat: 'png',
-			preIdentify: this.preIdentify.bind(this),
 			intents: config.client.intents || undefined,
+			ws: { maxPayload: 64000000000 },
 		};
 
 		if (!this.config.isPremium && !config.test) {
-			// if ((options.clusterId % 2) > 0) {
-			// 	clientConfig.compress = true;
-			// }
-
 			if (!this.globalConfig.disableGuildActivity) {
 				clientConfig.disableEvents.PRESENCE_UPDATE = true;
 				clientConfig.createGuild = this.createGuild.bind(this);
@@ -381,6 +380,82 @@ class RNet {
 		return false;
 	}
 
+	hookEris() {
+		const boundPreIdentify = this.preIdentify.bind(this);
+		const oldConnect = Eris.Shard.prototype.connect;
+		Eris.Shard.prototype.connect = function() {
+			boundPreIdentify(this.id).then(() => {
+				oldConnect.call(this);
+			});
+		}
+
+		Eris.ShardManager.prototype.connect = function(shard) {
+			shard.connect();
+            this.lastConnect = Date.now() + 7500;
+		}
+
+		Eris.Client.prototype.getChannel = function getChannel(channelID) {
+			const guild = this.guilds.get(this.channelGuildMap[channelID]);
+	
+			let channel = guild && guild.channels ? guild.channels.get(channelID) : null;
+	
+			if (!channel) {
+				channel = this.privateChannels.get(channelID) || this.groupChannels.get(channelID);
+			}
+	
+			return channel;
+		}
+
+		if (config.isPremium) { return; }
+
+		const loadGuild = function(guildID) {
+			const loadingGuild = this.isLoading.get(guildID);
+			if (loadingGuild) {
+				return loadingGuild;
+			}
+	
+			const p = new Promise(async (res, rej) => {
+				try {
+					let [guild, channels] = await Promise.all([
+						this.client.requestHandler.request("GET", Endpoints.GUILD(guildID), true),
+						this.client.requestHandler.request("GET", Endpoints.GUILD_CHANNELS(guildID), true),
+					]);
+	
+					guild.channels = channels;
+	
+					guild = this.client.guilds.add(guild, this.client, true);
+					if(this.client.options.getAllUsers && guild.members.size < guild.memberCount) {
+						await guild.fetchAllMembers();
+					}
+
+					return res(guild);
+				} catch (err) {
+					return rej(err);
+				}
+			});
+	
+			this.isLoading.set(guildID, p);
+	
+			setTimeout(() => {
+				if (!this.isLoading.has(guildID)) { return; }
+				this.isLoading.delete(guildID);
+			}, 10000);
+	
+			return p;
+		};
+		const oldWsEvent = Eris.Shard.prototype.wsEvent;
+		Eris.Shard.prototype.wsEvent = async function(packet) {
+			if (packet.d.guild_id) {
+				let guild = this.client.guilds.get(packet.d.guild_id);
+				if (guild && guild.inactive) {
+					await loadGuild.call(this, packet.d.guild_id);
+				}
+			}
+
+			oldWsEvent.call(this, packet);
+		}
+	}
+
 	preIdentify(id) {
 		let bucket, key, timeout;
 
@@ -401,7 +476,7 @@ class RNet {
 
 		return new Promise((resolve, reject) => {
 			lock.acquire(key).then(() => {
-				if (id) {
+				if (id !== undefined) {
 					logger.debug(`Acquired lock on ${id}`);
 				}
 
@@ -438,6 +513,7 @@ class RNet {
 		}
 
 		let guild = this.client.guilds.add(_guild, this.client, true);
+		guild.lastActive = Date.now();
 
 		if (config.clientOptions.getAllUsers && guild.members.size < guild.memberCount) {
 			guild.fetchAllMembers();

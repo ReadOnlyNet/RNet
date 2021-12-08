@@ -442,8 +442,10 @@ class RNet extends Module {
 
 		data.cpu = await this.getCpuUsage();
 
-		this.prom.register.getSingleMetric('rnet_app_gateway_events').set(this._events);
-		this._events = 0;
+		this.prom.register.getSingleMetric('rnet_app_gateway_events_count').inc(this._events);
+		if (this._events >= Number.MAX_SAFE_INTEGER) {
+			this._events = 0;
+		}
 
 		this.prom.register.getSingleMetric('rnet_app_guild_count').set(data.guilds);
 		this.prom.register.getSingleMetric('rnet_app_user_count').set(data.users);

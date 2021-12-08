@@ -30,7 +30,7 @@ class Carbon extends Module {
 		if (!this.rnet.isReady) return;
 		if (this.config.state !== 3 || this.rnet.clientOptions.clusterId !== 0) return;
 
-		this.info('Updating carbon stats.');
+		this.logger.info('Updating carbon stats.');
 
 		try {
 			var guildCounts = await this.redis.hgetall(`rnet:guilds:${this.config.client.id}`);

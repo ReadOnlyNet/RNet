@@ -34,7 +34,7 @@ class PermissionsManager {
 	 */
 	isServerAdmin(member, channel) {
 		// ignore DM
-		if (!member || channel.type !== 0) return false;
+		if (!member || !channel.guild) return false;
 		// let permissions = member.permissionsFor(channel);
 		return (member.id === channel.guild.ownerID || (member.permission &&
 				(member.permission.has('administrator') || member.permission.has('manageGuild'))));
@@ -48,7 +48,7 @@ class PermissionsManager {
 	 */
 	isServerMod(member, channel) {
 		// ignore DM
-		if (!member || channel.type !== 0) return false;
+		if (!member || !channel.guild) return false;
 
 		const guildConfig = this.rnet.guilds.get(channel.guild.id);
 

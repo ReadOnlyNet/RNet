@@ -24,7 +24,7 @@ class Logger {
 			if (!this.blocked || !this.blocked.length) return;
 
 			this.log('Event Loops Blocked', null, {
-				webhookUrl: config.shardWebhook,
+				webhookUrl: config.blockWebhook || config.shardWebhook,
 				username: 'Shard Manager',
 				text: this.blocked.join('\n'),
 				suppress: true,

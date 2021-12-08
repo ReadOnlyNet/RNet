@@ -69,12 +69,12 @@ class Guild extends Command {
 			return this.error(message.channel, err);
 		}
 
-		if (!this.isServerMod(message.member, message.channel)) {
-			payload.excludeKeys = ['customcommands', 'autoresponder'];
-		}
+		// if (!this.isServerMod(message.member, message.channel)) {
+		// 	payload.excludeKeys = ['customcommands', 'autoresponder'];
+		// }
 
 		try {
-			await this.redis.setex(`supportcfg:${uniqueId}`, 60, JSON.stringify(payload));
+			await this.redis.setex(`supportcfg:${uniqueId}`, 600, JSON.stringify(payload));
 		} catch (err) {
 			this.logger.error(err);
 			return this.error(message.channel, 'Something went wrong. Try again later.');
@@ -82,8 +82,8 @@ class Guild extends Command {
 
 		const url = `https://rnet.cf/support/c/${uniqueId}`;
 
-		const shardCount = this.rnet.globalConfig.shardCount;
-		const shard = ~~((guildId / 4194304) % shardCount);
+		const shardCount = guild.env === 'premium' ? this.rnet.globalConfig.premiumShardCount : this.rnet.globalConfig.shardCount;
+		const shard = guild.shard;
 
 		const desc = [
 			{ key: 'Server', value: guild.serverName },
@@ -122,7 +122,7 @@ class Guild extends Command {
 				{ name: 'Server', value: desc.map(o => `**${o.key}:** ${o.value}`).join('\n'), inline: true },
 			],
 			footer: { text: `ID: ${guild._id}` },
-			timestamp: new Date(),
+			timestamp: (new Date()).toISOString(),
 		};
 
 		if (status) {

@@ -62,8 +62,8 @@ if (cluster.isMaster) {
         name: 'rnet_app_user_count',
         help: 'User count based on cluster id',
     });
-    const gatewayEvents = new prom.Gauge({
-        name: 'rnet_app_gateway_events',
+    const gatewayEvents = new prom.Counter({
+        name: 'rnet_app_gateway_events_count',
         help: 'GW Event counter (type = event type)',
         labelNames: ['type'],
     });

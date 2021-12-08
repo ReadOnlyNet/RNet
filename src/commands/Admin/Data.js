@@ -23,17 +23,17 @@ class Data extends Command {
 		this.commands = [
 			{ name: 'user', desc: 'Get information about a user.', default: true },
 			{ name: 'premium', desc: 'Gets information about premium guilds of a user'},
-			{ name: 'guilds', desc: 'Get a list of guilds.' },
-			{ name: 'guild', desc: 'Get information about a guild.' },
-			{ name: 'mods', desc: 'Get moderations by user for the past month.' },
-			{ name: 'automod', desc: 'Get automod stats.' },
-			{ name: 'topshared', desc: 'Top list of bots with guild counts and shared guilds' },
-			{ name: 'addmodule', desc: 'NO' },
-			{ name: 'associate', desc: 'Potato' },
-			{ name: 'associates', desc: 'Potato' },
-			{ name: 'shards', desc: 'Shard stats' },
-			{ name: 'ishards', desc: 'Shard stats' },
-			{ name: 'cfg', desc: 'Potato' },
+			// { name: 'guilds', desc: 'Get a list of guilds.' },
+			// { name: 'guild', desc: 'Get information about a guild.' },
+			// { name: 'mods', desc: 'Get moderations by user for the past month.' },
+			// { name: 'automod', desc: 'Get automod stats.' },
+			// { name: 'topshared', desc: 'Top list of bots with guild counts and shared guilds' },
+			// { name: 'addmodule', desc: 'NO' },
+			// { name: 'associate', desc: 'Potato' },
+			// { name: 'associates', desc: 'Potato' },
+			// { name: 'shards', desc: 'Shard stats' },
+			// { name: 'ishards', desc: 'Shard stats' },
+			// { name: 'cfg', desc: 'Potato' },
 			{ name: 'listing', desc: 'Get listing information for a server' },
 		];
 
@@ -252,6 +252,24 @@ class Data extends Command {
 		return this.sendMessage(message.channel, { embed });
 	}
 
+	async getUserGuilds(userId, subdomain = 'premium') {
+		try {
+			const options = {
+				method: 'POST',
+				headers: { Authorization: this.rnet.globalConfig.apiToken },
+				url: `https://${subdomain ? `${subdomain}.` : ''}rnet.cf/api/userGuilds/${userId}`,
+			};
+
+			const response = await axios(options);
+			if (!response.data) {
+				return Promise.reject('Unable to retrieve data at this time.');
+			}
+			return response.data;
+		} catch (err) {
+			return Promise.reject(err);
+		}
+	}
+
 	async user({ message, args }) {
 		if (args && args.length) {
 			var resolvedUser = this.resolveUser(message.channel.guild, args.join(' '));
@@ -264,17 +282,13 @@ class Data extends Command {
 		const userId = resolvedUser ? resolvedUser.id : args[0] || message.author.id;
 		const user = resolvedUser;
 
-		let ownedGuilds, premiumGuilds
+		let ownedGuilds, premiumGuilds;
 		try {
-			var guilds = await this.models.Server
-				.find({ $or: [ { ownerID: userId }, { premiumUserId: userId } ]})
-				.sort({ memberCount: -1 })
-				.lean()
-				.exec();
-			
-			ownedGuilds = guilds.filter((i) => i.ownerID === userId);
-			premiumGuilds = guilds.filter((i) => i.premiumUserId === userId);
+			const guilds = await this.getUserGuilds(userId, args[1] || 'premium');
 
+			ownedGuilds = guilds.filter((i) => !i.deleted && i.ownerID === userId)
+				.sort((a, b) => (a.memberCount < b.memberCount) ? 1 : (a.memberCount > b.memberCount) ? -1 : 0);
+			premiumGuilds = guilds.filter((i) => i.premiumUserId === userId);
 		} catch (err) {
 			return this.error(`Unable to get guilds.`);
 		}
@@ -290,27 +304,18 @@ class Data extends Command {
 		userEmbed.fields.push({ name: 'ID', value: user.id, inline: true });
 		userEmbed.fields.push({ name: 'Name', value: user.username, inline: true });
 		userEmbed.fields.push({ name: 'Discrim', value: user.discriminator, inline: true });
-		userEmbed.fields.push({ name: 'Premium guilds:', value: premiumGuilds.length, inline: true });
 
-		await this.sendMessage(message.channel, { embed: userEmbed });
+		if (premiumGuilds && premiumGuilds.length) {
+			userEmbed.fields.push({ name: 'Premium Guilds', value: premiumGuilds.map(g => `${g.name} (${g._id})`).join('\n') });
+		}
 
-		if (!ownedGuilds || !ownedGuilds.length) return Promise.resolve();
-
-		const embed = {
-			title: 'Owned Guilds',
-			fields: [],
-		};
-
-		// START MODULES
-		const modules = this.rnet.modules.filter(m => !m.admin && !m.core && m.list !== false);
-
-		if (!modules) {
-			return this.error(message.channel, `Couldn't get a list of modules.`);
+		if (args[1] && args[1] === 'modules') {
+			var modules = this.rnet.modules.filter(m => !m.admin && !m.core && m.list !== false);
 		}
 
 		for (const guild of ownedGuilds) {
 			let valArray = [
-				`Region: ${guild.region}`,
+				`${guild._id}`,
 				`Members: ${guild.memberCount}`,
 				`Prefix: ${guild.prefix || '?'}`,
 			];
@@ -324,26 +329,25 @@ class Data extends Command {
 			if (guild.isPremium) {
 				valArray.push(`Premium: true`);
 			}
-			if (guild.deleted) {
-				valArray.push(`Kicked/Deleted: true`);
+
+			if (modules) {
+				let disabledModules = modules.filter(m => guild.modules.hasOwnProperty(m.name) && guild.modules[m.name] === false);
+
+				if (disabledModules && disabledModules.length) {
+					valArray.push(`Disabled Modules: ${disabledModules.map(m => m.name).join(', ')}`);
+				}
 			}
 
-			let disabledModules = modules.filter(m => guild.modules.hasOwnProperty(m.name) && guild.modules[m.name] === false);
-
-			if (disabledModules && disabledModules.length) {
-				valArray.push(`Disabled Modules: ${disabledModules.map(m => m.name).join(', ')}`);
-			}
-
-			valArray.push(`[Dashboard](https://www.rnet.cf/server/${guild._id})`);
-
-			embed.fields.push({
-				name: `${guild.name} (${guild._id})`,
+			userEmbed.fields.push({
+				name: `${guild.name}`,
 				value: valArray.join('\n'),
-				inline: false,
+				inline: true,
 			});
 		}
 
-		return this.sendMessage(message.channel, { embed });
+		userEmbed.fields = userEmbed.fields.slice(0, 25);
+
+		return this.sendMessage(message.channel, { embed: userEmbed });
 	}
 
 	async premium({ message, args }) {
@@ -362,7 +366,7 @@ class Data extends Command {
 		const userId = resolvedUser ? resolvedUser.id : args[0] || message.author.id;
 		const user = resolvedUser;
 
-		let premiumGuilds
+		let premiumGuilds;
 		try {
 			var guilds = await this.models.Server
 				.find({ premiumUserId: userId })
@@ -371,7 +375,7 @@ class Data extends Command {
 				.sort({ memberCount: -1 })
 				.lean()
 				.exec();
-			
+
 			premiumGuilds = guilds.filter((i) => i.premiumUserId === userId);
 
 		} catch (err) {
@@ -691,7 +695,7 @@ class Data extends Command {
 			return this.error(message.channel, 'Something went wrong. Try again later.');
 		}
 
-		const url = `https://rnet.cf/support/c/${uniqueId}`;
+		const url = `<https://rnet.cf/support/c/${uniqueId}>`;
 
 		return this.sendMessage(message.channel, url);
 	}

@@ -154,7 +154,7 @@ declare module RNet {
 		_id: string;
 		prefix: string;
 		modules: {[key: string]: boolean};
-		commands: {[key: string]: boolean};
+		commands: {[key: string]: any};
 		subcommands?: {[key: string]: any};
 		name?: string;
 		iconURL?: string;

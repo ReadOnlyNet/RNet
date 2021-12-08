@@ -9,7 +9,6 @@ class RPCServer extends Server {
 
 		this.rnet = rnet;
 		this.id = rnet.clientOptions.clusterId;
-		this.logger = rnet.logger;
 
 		const host = rnet.config.rpcHost || 'localhost';
 		const port = 30000 + parseInt(this.id, 10);

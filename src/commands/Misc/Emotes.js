@@ -28,7 +28,7 @@ class Emojis extends Command {
 		}
 
 		if (query) {
-			emojis = emojis.filter(e => e.name.toLowerCase().search(query) > -1);
+			emojis = emojis.filter(e => e.name.toLowerCase().search(this.utils.regEscape(query)) > -1);
 		}
 
 		if (query && (!emojis || !emojis.length)) {

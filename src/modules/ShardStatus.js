@@ -41,7 +41,7 @@ class ShardStatus extends Module {
 
 		this.blockHandler = blocked(ms => {
 			const id = this.cluster.clusterId.toString();
-			const text = `C${id} blocked for ${ms}ms`;
+			const text = `PID:${process.pid} C${id} blocked for ${ms}ms`;
 
 			this.logger.info(`[RNet] ${text}`);
 
@@ -73,7 +73,7 @@ class ShardStatus extends Module {
 
 		try {
 			this.postStat('ready');
-			this.cmClient.request('shardReady', { id, cluster: this.cluster.clusterId });
+			this.cmClient.request('shardReady', { id, cluster: this.cluster.clusterId, pid: process.pid });
 		} catch (err) {
 			// pass
 		}
@@ -88,7 +88,7 @@ class ShardStatus extends Module {
 
 		try {
 			this.postStat('resume');
-			this.cmClient.request('shardResume', { id, cluster: this.cluster.clusterId });
+			this.cmClient.request('shardResume', { id, cluster: this.cluster.clusterId, pid: process.pid });
 		} catch (err) {
 			// pass
 		}
@@ -100,14 +100,14 @@ class ShardStatus extends Module {
 	 * @param  {Number} id  Shard ID
 	 */
 	shardDisconnect(err, id) {
+		const shard = this.client.shards.get(id);
 		if (err) {
-			const shard = this.client.shards.get(id);
 			this.logger.warn(err, { type: 'rnet.cfardDisconnect', cluster: this.cluster.clusterId, shard: id, trace: shard.discordServerTrace });
 		}
 
 		this.logger.info(`[RNet] Shard ${id} disconnected`);
 
-		let data = { id, cluster: this.cluster.clusterId };
+		let data = { id, cluster: this.cluster.clusterId, pid: process.pid, trace: shard.discordServerTrace };
 		if (err) {
 			if (err.code) {
 				data.err = err.code;

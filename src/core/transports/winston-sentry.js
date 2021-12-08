@@ -30,7 +30,7 @@ var Sentry = winston.transports.Sentry = function (options) {
 
   this.options = Object.assign({}, this.defaults, options);
 
-  Raven.config(this.options.dsn, this.options);
+  Raven.config(false, this.options);
 
   // Handle errors
   Raven.on('error', function (error) {

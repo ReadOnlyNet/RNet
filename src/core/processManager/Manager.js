@@ -17,12 +17,14 @@ class Manager {
 
 		cluster.on('exit', this.handleExit.bind(this));
 
-		cluster.setupMaster({
-			silent: true,
-		});
+		if(config.logWSEnabled) {
+			cluster.setupMaster({
+				silent: true,
+			});
 
-		this.logServer = new LogServer();
-		this.logServer.init(5025);
+			this.logServer = new LogServer();
+			this.logServer.init(5025);
+		}
 
 		this.clusterManager = this.createManager();
 
@@ -60,7 +62,10 @@ class Manager {
 		const proc = new Process(this, {
 			manager: true,
 		});
-		this.logServer.hook(proc);
+
+		if(config.logWSEnabled) {
+			this.logServer.hook(proc);
+		}
 
 		return proc;
 	}
@@ -68,7 +73,10 @@ class Manager {
 	createProcess(options) {
 		const process = new Process(this, options);
 		this.processes.set(process.id, process);
-		this.logServer.hook(process);
+
+		if(config.logWSEnabled) {
+			this.logServer.hook(process);
+		}
 
 		return process;
 	}

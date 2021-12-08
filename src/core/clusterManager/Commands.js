@@ -136,23 +136,26 @@ class Commands {
 		return cb(null);
 	}
 
-	shardDisconnect({ id, cluster, err }, cb) {
-		let msg = `[C${cluster}] Shard ${id} disconnected`;
+	shardDisconnect({ id, cluster, err, pid, trace }, cb) {
+		let msg = `[C${cluster}] [${pid}] Shard ${id} disconnected`;
 		if (err) {
 			msg += ` ${err}`;
+		}
+		if (trace) {
+			msg += ` trace: ${trace}`;
 		}
 		this.logger.shardStatus.push(msg);
 		return cb(null);
 	}
 
-	shardReady({ id, cluster }, cb) {
-		let msg = `[C${cluster}] Shard ${id} ready`;
+	shardReady({ id, cluster, pid }, cb) {
+		let msg = `[C${cluster}] [${pid}] Shard ${id} ready`;
 		this.logger.shardStatus.push(msg);
 		return cb(null);
 	}
 
-	shardResume({ id, cluster }, cb) {
-		let msg = `[C${cluster}] Shard ${id} resumed`;
+	shardResume({ id, cluster, pid }, cb) {
+		let msg = `[C${cluster}] [${pid}] Shard ${id} resumed`;
 		this.logger.shardStatus.push(msg);
 		return cb(null);
 	}

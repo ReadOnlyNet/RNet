@@ -47,7 +47,7 @@ class Roles extends Command {
 		let roles = this.utils.sortRoles(guild.roles);
 
 		if (query) {
-			roles = roles.filter(r => r.name.toLowerCase().search(query) > -1);
+			roles = roles.filter(r => r.name.toLowerCase().search(this.utils.regEscape(query)) > -1);
 		}
 
 		for (let role of roles) {

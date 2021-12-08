@@ -205,8 +205,8 @@ class CommandHandler extends Module {
 	 * @param {Message} message Message object
 	 * @returns {*}
 	 */
-	messageCreate(e) {
-		const { message, guildConfig, isAdmin } = e;
+	async messageCreate(e) {
+		const { message, guildConfig, isAdmin, isSplit } = e;
 		if (!message.author || message.author.bot) return;
 
 		// handle DM's
@@ -250,6 +250,21 @@ class CommandHandler extends Module {
 
 		let msgContent = message.content;
 		const hasPrefix = prefixes.filter(p => message.content.startsWith(p));
+		const hasSplit = prefixes.find(p => message.content.includes(` && ${p}`));
+
+		if (hasPrefix && hasPrefix.length && hasSplit) {
+			const messages = message.content.split(' && ').slice(0, 3);
+			for (let m of messages) {
+				const msg = {
+					...message,
+				};
+				msg.content = m;
+				msg.cleanContent = m;
+				msg.guild = message.guild;
+				await this.messageCreate({ message: msg, guildConfig, isAdmin, isSplit: true }); //.catch(() => null);
+			}
+			return;
+		}
 
 		// ignore if it's not a prefixed command
 		if (!(isAdmin && message.content.startsWith(this.config.sudopref)) && (!hasPrefix || !hasPrefix.length)) {
@@ -266,7 +281,7 @@ class CommandHandler extends Module {
 		cmd = cmd.split(' ')[0].toLowerCase();
 		if (!cmd.length) return;
 
-		if (this.shouldCooldown(message)) return;
+		if (!isSplit && this.shouldCooldown(message)) return;
 
 		const commands = this.rnet.commands;
 
@@ -326,7 +341,7 @@ class CommandHandler extends Module {
 
 		// execute command
 		try {
-			command._execute({
+			return command._execute({
 				message: message,
 				args: args,
 				command: cmd,
