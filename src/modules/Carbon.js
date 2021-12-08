@@ -1,21 +1,22 @@
 'use strict';
 
-const axios = require('axios');
-const { Module } = require('@rnet.cf/rnet-core');
+const superagent = require('superagent');
+const Module = Loader.require('./core/structures/Module');
+const statsd = require('../core/statsd');
+
 /**
  * Carbon Module
  * @class Carbon
  * @extends Module
  */
 class Carbon extends Module {
-	constructor(...args) {
-		super(...args);
+	constructor() {
+		super();
 
 		this.module = 'Carbon';
 		this.enabled = true;
 		this.core = true;
 		this.list = false;
-		this.guildsGauge = this.prom.register.getSingleMetric('rnet_app_guilds_carbon');
 	}
 
 	static get name() {
@@ -28,19 +29,19 @@ class Carbon extends Module {
 
 	async updateCarbon() {
 		if (!this.rnet.isReady) return;
-		if (this.config.state !== 3 || this.rnet.clientOptions.clusterId !== 0) return;
+		if (this.config.state !== 3 || this.rnet.options.clusterId !== 0) return;
 
 		this.info('Updating carbon stats.');
 
 		try {
-			var guildCounts = await this.redis.hgetall(`rnet:guilds:${this.config.client.id}`);
+			var guildCounts = await this.redis.hgetallAsync(`rnet:guilds:${this.config.client.id}`);
 		} catch (err) {
 			return this.logger.error(err);
 		}
 
-		let guildCount = Object.values(guildCounts).reduce((a, b) => a += parseInt(b), 0);
+		let guildCount = Object.values(guildCounts).reduce((a, b) => { a += parseInt(b); return a; }, 0);
 
-		this.guildsGauge.set(guildCount);
+		statsd.gauge(`guilds.${this.config.client.id}`, guildCount);
 
 		const data = {
 			shard_id: 0,
@@ -49,40 +50,21 @@ class Carbon extends Module {
 		};
 
 		// Post to carbonitex
-		axios.post(this.config.carbon.url, {
-			headers: { Accept: 'application/json' },
-			key: this.config.carbon.key,
-			...Object.assign(data, {
+		superagent
+			.post(this.config.carbon.url)
+			.send(Object.assign({ key: this.config.carbon.key }, Object.assign(data, {
 				logoid: `https://www.rnet.cf/images/rnet-v2-300.jpg`,
-			}),
-		}).catch(() => null);
+			})))
+			.set('Accept', 'application/json')
+			.end(err => err ? this.logger.error(err) : false);
 
 		// Post to bots.discord.pw
-		axios.post(this.config.dbots.url, {
-			headers: {
-				Authorization: this.config.dbots.key,
-				Accept: 'application/json',
-			},
-			...data,
-		}).catch(() => null);
-
-		// Post to discordbots.org
-		axios.post(this.config.dbl.url, {
-			headers: {
-				Authorization: this.config.dbl.key,
-				Accept: 'application/json',
-			},
-			...data,
-		}).catch(() => null);
-
-		// Post to discordbots.org
-		axios.post(this.config.botspace.url, {
-			headers: {
-				Authorization: this.config.botspace.key,
-				Accept: 'application/json',
-			},
-			...data,
-		}).catch(() => null);
+		superagent
+			.post(this.config.dbots.url)
+			.send(data)
+			.set('Authorization', this.config.dbots.key)
+			.set('Accept', 'application/json')
+			.end(() => false); // ignore timeouts
 	}
 }
 

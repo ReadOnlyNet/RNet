@@ -1,6 +1,6 @@
 'use strict';
 
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
 
 class LoadController extends Command {
 	constructor(...args) {

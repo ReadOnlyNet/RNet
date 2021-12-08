@@ -1,13 +1,17 @@
 'use strict';
 
-const { Module } = require('@rnet.cf/rnet-core');
-const { exec } = require('child_process');
 const os = require('os');
 const each = require('async-each');
-const eris = require('@rnet.cf/eris');
+const eris = require('eris');
 const moment = require('moment');
 const blocked = require('blocked');
 const pidusage = require('pidusage');
+const { exec } = require('child_process');
+const Module = Loader.require('./core/structures/Module');
+const utils = Loader.require('./core/utils');
+const { Server, GuildLog } = require('../core/models');
+const redis = require('../core/redis');
+const statsd = require('../core/statsd');
 
 require('moment-duration-format');
 
@@ -17,8 +21,8 @@ require('moment-duration-format');
  * @extends Module
  */
 class RNet extends Module {
-	constructor(...args) {
-		super(...args);
+	constructor() {
+		super();
 
 		this.module = 'RNet';
 		this.description = 'RNet stats, guild, and dm logs.';
@@ -78,19 +82,21 @@ class RNet extends Module {
 		this.rnet.commands.on('command', this.commandSuccessListener);
 		this.rnet.commands.on('error', this.commandFailureListener);
 
-		this._blocked = blocked(ms => {
-			this.prom.register.getSingleMetric('rnet_app_node_blocked').inc();
-		}, { threshold: 100 });
+//		this._blocked = blocked(ms => {
+//			statsd.increment(`node.blocked.${this.config.stateName}`, 1);
+//		}, { threshold: 100 });
 
-		this.guildCreateListener = this.onGuildCreate.bind(this);
-		this.guildDeleteListener = this.onGuildDelete.bind(this);
-		this.messageCreateListener = this.onMessage.bind(this);
-		this.rawWSListener = this.onRawEvent.bind(this);
+		if (this.config.isCore) {
+			this.guildCreateListener = this.onGuildCreate.bind(this);
+			this.guildDeleteListener = this.onGuildDelete.bind(this);
+			this.messageCreateListener = this.onMessage.bind(this);
+			this.rawWSListener = this.onRawEvent.bind(this);
 
-		this.client.on('guildCreate', this.guildCreateListener);
-		this.client.on('guildDelete', this.guildDeleteListener);
-		this.client.on('messageCreate', this.messageCreateListener);
-		this.client.on('rawWS', this.rawWSListener);
+			this.client.on('guildCreate', this.guildCreateListener);
+			this.client.on('guildDelete', this.guildDeleteListener);
+//			this.client.on('messageCreate', this.messageCreateListener);
+			this.client.on('rawWS', this.rawWSListener);
+		}
 	}
 
 	unload() {
@@ -107,7 +113,9 @@ class RNet extends Module {
 
 		process.removeListener('uncaughtException', this.exceptionHandler);
 
-		clearInterval(this._blocked);
+		if (this._blocked) {
+			clearInterval(this._blocked);
+		}
 	}
 
 	/**
@@ -162,8 +170,9 @@ class RNet extends Module {
 	 * @param {Guild} guild Guild object
 	 */
 	onGuildCreate(guild) {
+		if (!this.config.isCore) return;
 		this.logGuildEvent('Created', this.parseGuild(guild));
-		this.prom.register.getSingleMetric('rnet_app_guild_events').inc({ type: 'create' });
+		statsd.increment('guild.events.create', 1);
 	}
 
 	/**
@@ -171,35 +180,36 @@ class RNet extends Module {
 	 * @param {Guild} guild Guild object
 	 */
 	onGuildDelete(guild) {
+		if (!this.config.isCore) return;
 		this.logGuildEvent('Deleted', this.parseGuild(guild));
-		this.prom.register.getSingleMetric('rnet_app_guild_events').inc({ type: 'delete' });
+		statsd.increment('guild.events.delete', 1);
 	}
 
 	/**
 	 * Handle direct messages received
 	 * @param {Message} message Message object
 	 */
-	// messageCreate({ message }) {
-	// 	if (message.channel.guild || message.author.id === this.client.user.id) return;
+	messageCreate({ message }) {
+		if (message.channel.guild || message.author.id === this.client.user.id) return;
 
-	// 	this.ipc.send('broadcast', {
-	// 		op: 'directMessage',
-	// 		d: {
-	// 			id: message.id,
-	// 			author: {
-	// 				id: message.author.id,
-	// 				username: message.author.username,
-	// 				discriminator: message.author.discriminator,
-	// 				avatar: message.author.icon,
-	// 				avatarURL: message.author.avatarURL,
-	// 			},
-	// 			content: message.content,
-	// 		},
-	// 	});
-	// }
+		this.ipc.send('broadcast', {
+			op: 'directMessage',
+			d: {
+				id: message.id,
+				author: {
+					id: message.author.id,
+					username: message.author.username,
+					discriminator: message.author.discriminator,
+					avatar: message.author.icon,
+					avatarURL: message.author.avatarURL,
+				},
+				content: message.content,
+			},
+		});
+	}
 
 	onMessage() {
-		this.prom.register.getSingleMetric('rnet_app_message_events').inc({ type: 'create' });
+		//statsd.increment('message.create', 1);
 	}
 
 	onRawEvent() {
@@ -208,13 +218,19 @@ class RNet extends Module {
 	}
 
 	onCommandSuccess({ command, time }) {
-		this.prom.register.getSingleMetric('rnet_app_command_success').inc({ group: (command.group || command.module), name: command.name });
-		this.prom.register.getSingleMetric('rnet_app_command_time').observe({ group: (command.group || command.module), name: command.name }, time);
+		statsd.increment([
+			`commands.${command.group || command.module}.${command.name}.count`,
+			`commands.${command.group || command.module}.${command.name}.success`,
+			]);
+		statsd.timing(`commands.${command.group || command.module}.${command.name}.time`, time);
 	}
 
 	onCommandFailure({ command, time }) {
-		this.prom.register.getSingleMetric('rnet_app_command_error').inc({ group: (command.group || command.module), name: command.name });
-		this.prom.register.getSingleMetric('rnet_app_command_time').observe({ group: (command.group || command.module), name: command.name }, time);
+		statsd.increment([
+			`commands.${command.group || command.module}.${command.name}.count`,
+			`commands.${command.group || command.module}.${command.name}.error`,
+			]);
+		statsd.timing(`commands.${command.group || command.module}.${command.name}.time`, time);
 	}
 
 	/**
@@ -284,7 +300,7 @@ class RNet extends Module {
 					footer: {
 						text: `${this.config.stateName} | Shard ${guild.shard} | ID: ${guild.id}`,
 					},
-				}],
+				}]
 			};
 
 			if (!this.guildlogChannel) {
@@ -299,17 +315,13 @@ class RNet extends Module {
 			}
 		}
 
-		const log = new this.models.GuildLog({
+		const log = new GuildLog({
 			id: guild.id,
 			guild: guild,
 			action: event,
 		});
 
-		try {
-			log.save(err => err ? this.logger.error(err) : false);
-		} catch (err) {
-			this.logger.error(err);
-		}
+		log.save(err => err ? this.logger.error(err) : false);
 	}
 
 	/**
@@ -369,7 +381,7 @@ class RNet extends Module {
 		if (this._docs) return Promise.resolve(this._docs);
 
 		return new Promise((resolve, reject) =>
-			this.models.Server.find({ 'modules.RNet': true }).lean().exec()
+			Server.find({ 'modules.RNet': true }).lean().exec()
 				.catch(reject)
 				.then(docs => {
 					this._docs = docs;
@@ -389,11 +401,13 @@ class RNet extends Module {
 	 * Update bot/shard stats
 	 */
 	async updateStats() {
+		if (!this.rnet.isReady) return;
+
 		let voiceConnections = this.client.voiceConnections.size || 0,
 			playingConnections = [...this.client.voiceConnections.values()].filter(c => c.playing && !c.ended);
 
 		let coredata = {
-			id: this.rnet.clientOptions.clusterId,
+			id: this.rnet.options.clusterId,
 			pid: process.pid,
 			guilds: this.client.guilds.size,
 			users: this.client.users.size,
@@ -401,39 +415,7 @@ class RNet extends Module {
 			uptime: process.uptime(),
 			time: Date.now(),
 			isPremium: this.config.isPremium || null,
-			events: this._events,
 		};
-
-		const clusterId = this.rnet.clientOptions.clusterId.toString();
-		const state = this.config.state;
-		let status;
-
-		try {
-			const uptime = moment.duration(process.uptime(), 'seconds');
-			const started = moment().subtract(process.uptime(), 'seconds').format('llll');
-
-			status = {
-				env: this.config.env,
-				server: this.config.stateName,
-				clusterId: clusterId,
-				shardCount: this.client.shards.size,
-				connectedCount: this.client.shards.filter(s => s.status === 'ready').length,
-				guildCount: this.client.guilds.size,
-				unavailableCount: this.client.unavailableGuilds.size,
-				voiceConnections: voiceConnections,
-				shards: [...this.client.shards.keys()],
-				shardStatus: [...this.client.shards.values()].map(s => ({ id: s.id, status: s.status })),
-				uptime: uptime.format('w [w] d [d], h [h], m [m], s [s]'),
-				started: started,
-			};
-
-			this.redis.set(`rnet.status.${state}.${clusterId}`, JSON.stringify(status), 'EX', 90);
-			this.redis.set(`rnet:status:${this.config.env}:${clusterId}`, JSON.stringify(status), 'EX', 90);
-        } catch (err) {
-			this.logger.error(err);
-		}
-
-		if (!this.rnet.isReady) return;
 
 		let data = Object.assign({}, coredata, {
 			voice: voiceConnections || 0,
@@ -442,33 +424,37 @@ class RNet extends Module {
 
 		data.cpu = await this.getCpuUsage();
 
-		this.prom.register.getSingleMetric('rnet_app_gateway_events').set(this._events);
-		this._events = 0;
-
-		this.prom.register.getSingleMetric('rnet_app_guild_count').set(data.guilds);
-		this.prom.register.getSingleMetric('rnet_app_user_count').set(data.users);
+		let clusterId = this.rnet.options.clusterId.toString(),
+			state = this.config.state;
 
 		if (this.config.isCore) {
 			try {
 				await Promise.all([
-					this.redis.hset(`rnet:guilds:${this.config.client.id}`, `${state}:${clusterId}`, this.client.guilds.size),
-					this.redis.hset(`rnet:cstats:${this.config.client.id}`, `${state}:${clusterId}`, JSON.stringify(coredata)),
+					redis.hsetAsync(`rnet:guilds:${this.config.client.id}`, clusterId, this.client.guilds.size),
+					redis.hsetAsync(`rnet:cstats:${this.config.client.id}`, clusterId, JSON.stringify(coredata)),
 					]);
 			} catch (err) {
 				this.logger.error(err, { type: 'rnet.updateStats.coreStats' });
 			}
+			statsd.gauge(`guilds.${state}.${clusterId}`, data.guilds);
+			statsd.gauge(`users.${state}.${clusterId}`, data.users);
+			statsd.gauge(`gateway.${state}.${clusterId}`, this._events);
+			this._events = 0;
+		} else {
+			statsd.gauge(`voice.total.${state}.${clusterId}`, data.voice || 0);
+			statsd.gauge(`voice.playing.${state}.${clusterId}`, data.playing || 0);
 		}
 
 		try {
 			await Promise.all([
-				this.redis.hset(`rnet:vc`, `${state}:${clusterId}`, data.voice || 0),
-				this.redis.hset(`rnet:stats:${state}`, clusterId || 0, JSON.stringify(data)),
+				redis.hsetAsync(`rnet:vc`, `${state}:${clusterId}`, data.voice || 0),
+				redis.hsetAsync(`rnet:stats:${state}`, clusterId || 0, JSON.stringify(data)),
 				]);
 		} catch (err) {
 			this.logger.error(err, { type: 'rnet.updateStats.stats' });
 		}
 
-		if (this.rnet.clientOptions.clusterId !== 0) {
+		if (this.rnet.options.clusterId !== 0) {
 			return;
 		}
 
@@ -503,8 +489,8 @@ class RNet extends Module {
 
 		try {
 			var [shards, vcs, ffmpegs] = Promise.all([
-				this.redis.hgetall(`rnet:stats:${this.config.state}`),
-				this.redis.hgetall(`rnet:vc`),
+				redis.hgetallAsync(`rnet:stats:${this.config.state}`),
+				redis.hgetallAsync(`rnet:vc`),
 				this.getFFmpegs(),
 			]);
 		} catch (err) {};
@@ -541,7 +527,7 @@ class RNet extends Module {
 		const embed = {
 			author: {
 				name: 'RNet',
-				icon_url: `${this.config.avatar}`,
+				icon_url: `${this.config.site.host}/${this.config.avatar}`,
 			},
 			fields: [
 				{ name: 'Guilds', value: `${data.guilds.toString()}`, inline: true },
@@ -549,10 +535,10 @@ class RNet extends Module {
 				{ name: 'Streams', value: `${data.playing}/${data.voice}`, inline: true },
 				{ name: 'FFMPEGs', value: `${ffmpegs.toString()}`, inline: true },
 				{ name: 'Load Avg', value: `${os.loadavg().map(n => n.toFixed(3)).join(', ')}`, inline: true },
-				{ name: 'Free Mem', value: `${this.utils.formatBytes(os.freemem())} / ${this.utils.formatBytes(os.totalmem())}`, inline: true },
+				{ name: 'Free Mem', value: `${utils.formatBytes(os.freemem())} / ${utils.formatBytes(os.totalmem())}`, inline: true },
 			],
 			footer: {
-				text: `${this.config.stateName} | Cluster ${this.rnet.clientOptions.clusterId.toString()}`,
+				text: `${this.config.stateName} | Cluster ${this.rnet.options.clusterId}`,
 			},
 			timestamp: new Date(),
 		};
@@ -564,18 +550,18 @@ class RNet extends Module {
 				.format('w[w] d[d], h[h], m[m], s[s]');
 
 			if (data.shards.length > 25) {
-				description.push(`\`C${this.utils.pad(shard.id, 2)} | ${this.utils.pad(shard.pid, 5)} | ${shard.guilds}g | ${this.utils.pad(shard.voice, 2)}vc | ${this.utils.pad(shard.cpu + '%', 6)} | ${this.utils.pad(this.utils.formatBytes(shard.mem.rss, 2), 9)} | ${uptime}\``);
+				description.push(`\`C${utils.pad(shard.id, 2)} | ${utils.pad(shard.pid, 5)} | ${shard.guilds}g | ${utils.pad(shard.voice, 2)}vc | ${utils.pad(shard.cpu + '%', 6)} | ${utils.pad(utils.formatBytes(shard.mem.rss, 2), 9)} | ${uptime}\``);
 			} else {
 				embed.fields.push({
 					name: `C${shard.id} | ${shard.pid} | ${shard.guilds} guilds | ${shard.voice} vc`,
-					value: `${shard.cpu}%, ${this.utils.formatBytes(shard.mem.rss, 2)}, ${uptime}`,
+					value: `${shard.cpu}%, ${utils.formatBytes(shard.mem.rss, 2)}, ${uptime}`,
 					inline: false,
 				});
 			}
 		}
 
 		if (description.length) {
-			const fields = this.utils.splitMessage(description, 1000);
+			const fields = utils.splitMessage(description, 1000);
 			for (let field of fields) {
 				embed.fields.push({ name: '\u200b', value: field });
 			}

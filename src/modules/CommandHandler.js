@@ -1,7 +1,9 @@
 'use strict';
 
-const { Module } = require('@rnet.cf/rnet-core');
-const each = require('async-each');
+const Module = Loader.require('./core/structures/Module');
+const utils = Loader.require('./core/utils');
+const { OverrideLog } = require('../core/models');
+const statsd = require('../core/statsd');
 
 /**
  * Carbon Module
@@ -9,8 +11,8 @@ const each = require('async-each');
  * @extends Module
  */
 class CommandHandler extends Module {
-	constructor(...args) {
-		super(...args);
+	constructor() {
+		super();
 
 		this.module = 'CommandHandler';
 		this.enabled = true;
@@ -29,39 +31,30 @@ class CommandHandler extends Module {
 		this.cooldown = 900;
 		this.dmCooldown = 10000;
 
-		this.commandLog = [];
-
 		this.schedule('*/1 * * * *', this.clearCooldowns.bind(this));
+
+		this.enabledCommandGroups = this.config.enabledCommandGroups ? this.config.enabledCommandGroups.split(',') : null;
+		this.disabledCommandGroups = this.config.disabledCommandGroups ? this.config.disabledCommandGroups.split(',') : null;
 
 		this.footer = [
 			`**Additional links and help**\n`,
-			`[All Commands](${this.config.site.host}/commands)`,
-			`[RNet Discord](${this.config.site.host}/discord)`,
-			`[Add To Your Server](${this.config.site.host}/invite)`,
-			`[Donate](${this.config.site.host}/donate)`,
+			`[All Commands](${this._config.site.host}/commands)`,
+			`[RNet Discord](${this._config.site.host}/discord)`,
+			`[Add To Your Server](${this._config.site.host}/invite)`,
+			`[Donate](${this._config.site.host}/donate)`,
 		];
 	}
 
-	crashReport() {
-		return this.commandLog.join('\n');
-	}
-
 	clearCooldowns() {
-		each([...this.cooldowns.keys()], id => {
-			let time = this.cooldowns.get(id);
-			if ((Date.now() - time) < this.cooldown) return;
+		for (const [id, time] of this.cooldowns.entries()) {
+			if ((Date.now() - time) < this.cooldown) continue;
 			this.cooldowns.delete(id);
-		});
-		each([...this.dmCooldowns.keys()], id => {
-			let time = this.dmCooldowns.get(id);
-			if ((Date.now() - time) < this.dmCooldown) return;
-			this.dmCooldowns.delete(id);
-		});
-	}
+		}
 
-	logCommand(logEntry) {
-		this.commandLog.unshift(logEntry);
-		this.commandLog = this.commandLog.slice(0,20);
+		for (const [id, time] of this.dmCooldowns.entries()) {
+			if ((Date.now() - time) < this.dmCooldown) continue;
+			this.dmCooldowns.delete(id);
+		}
 	}
 
 	handleDM({ message }) {
@@ -85,14 +78,11 @@ class CommandHandler extends Module {
 		});
 	}
 
-	canExecute(command, e) {
-		const { message, guildConfig, isAdmin, isOverseer } = e;
+	canExecute(command, { message, guildConfig, isAdmin, isOverseer }) {
 		const isServerAdmin = this.isServerAdmin(message.member, message.channel);
 		const isServerMod   = this.isServerMod(message.member, message.channel);
 
 		let hasPermission = true;
-		let isMod = isServerMod || isServerAdmin || isOverseer;
-
 		if (isAdmin) return true;
 
 		const globalConfig = this.rnet.globalConfig || {};
@@ -100,14 +90,12 @@ class CommandHandler extends Module {
 			return false;
 		}
 
-		if (!isMod && guildConfig.ignoredChannels && guildConfig.ignoredChannels.includes(message.channel.id)) {
-			return false;
+		if (!isServerMod && !isServerAdmin && !isOverseer && guildConfig.ignoredChannels &&
+			guildConfig.ignoredChannels.includes(message.channel.id)) {
+				return false;
 		}
-		if (!isMod && guildConfig.ignoredUsers && guildConfig.ignoredUsers.find(u => u.id === message.author.id)) {
-			return false;
-		}
-		if (!isMod && guildConfig.ignoredRoles && message.member && message.member.roles &&
-			guildConfig.ignoredRoles.find(r => message.member.roles.includes(r))) {
+		if (!isServerMod && !isServerAdmin && !isOverseer && guildConfig.ignoredUsers &&
+			guildConfig.ignoredUsers.find(u => u.id === message.author.id)) {
 				return false;
 		}
 
@@ -120,11 +108,9 @@ class CommandHandler extends Module {
 		// ignore admin commands for users without rights
 		if (command.permissions === 'admin' && !isAdmin) hasPermission = false;
 
-		if (!isServerAdmin) {
-			const shouldOverride = this.commandEnabled(e, command);
-			if (typeof shouldOverride === 'boolean') {
-				hasPermission = shouldOverride;
-			}
+		const overwrite = this.permissionsManager.canOverride(message.channel, message.author, command.name);
+		if (typeof overwrite === 'boolean') {
+			hasPermission = overwrite;
 		}
 
 		if (command.overseerEnabled && isOverseer) {
@@ -141,63 +127,24 @@ class CommandHandler extends Module {
 		return hasPermission;
 	}
 
-	commandEnabled(e, command) {
-		const { message, guildConfig } = e;
-
-		if (command.permissions === 'admin') {
-			return;
-		}
-
-		const commandOpts = guildConfig.commands[command.name];
-		if (!commandOpts) {
-			return;
-		}
-
-		if (commandOpts.ignoredChannels) {
-			if (commandOpts.ignoredChannels.includes(message.channel.id)) {
-				return false;
+	commandGroupEnabled(group) {
+		if (this.enabledCommandGroups) {
+			if (this.enabledCommandGroups.includes(group)) {
+				return true;
 			}
 
-			if (message.channel.parentID && commandOpts.ignoredChannels.includes(message.channel.parentID)) {
-				return false;
-			}
-		}
-
-		if (commandOpts.ignoredRoles && commandOpts.ignoredRoles.find(r => message.member.roles.includes(r))) {
 			return false;
 		}
 
-		let hasPermissions;
-
-		if (commandOpts.allowedRoles && commandOpts.allowedRoles.find(r => message.member.roles.includes(r))) {
-			hasPermissions = true;
-		}
-
-		if (commandOpts.allowedChannels) {
-			if (commandOpts.allowedChannels.includes(message.channel.id) ||
-				(message.channel.parentID && commandOpts.allowedChannels.includes(message.channel.parentID))) {
-					hasPermissions = true;
+		if (this.disabledCommandGroups) {
+			if (this.disabledCommandGroups.includes(group)) {
+				return false;
 			}
+
+			return true;
 		}
 
-		if (commandOpts.allowedRoles && commandOpts.allowedRoles.length && !commandOpts.allowedRoles.find(r => message.member.roles.includes(r))) {
-			hasPermissions = false;
-		}
-
-		if (commandOpts.allowedChannels && commandOpts.allowedChannels.length) {
-			if (!commandOpts.allowedChannels.includes(message.channel.id) && !commandOpts.allowedChannels.includes(message.channel.parentID)) {
-				hasPermissions = false;
-			}
-		}
-
-		return hasPermissions;
-	}
-
-	shouldCooldown(message) {
-		const cooldown = this.cooldowns.get(message.author.id);
-		if (cooldown && (Date.now() - cooldown) <= this.cooldown) return true;
-		this.cooldowns.set(message.author.id, Date.now());
-		return false;
+		return true;
 	}
 
 	/**
@@ -227,11 +174,11 @@ class CommandHandler extends Module {
 			}
 		}
 
-		// if (!(this.config.isPremium || this.config.test) && guildConfig.clientID && this.config.client.id !== guildConfig.clientID) {
-		// 	return false;
-		// }
+		if (!this.config.isPremium && guildConfig.clientID && this.config.client.id !== guildConfig.clientID) {
+			return false;
+		}
 
-		if (this.config.handleRegion && !this.utils.regionEnabled(message.guild, this.config)) {
+		if (this.config.handleRegion && !utils.regionEnabled(message.guild, this.config)) {
 			return false;
 		}
 
@@ -243,10 +190,6 @@ class CommandHandler extends Module {
 				`<@!${this.client.user.id}> `,
 				prefix,
 			];
-
-		if (this.config.localPrefix) {
-			prefixes.push(this.config.localPrefix);
-		}
 
 		let msgContent = message.content;
 		const hasPrefix = prefixes.filter(p => message.content.startsWith(p));
@@ -260,13 +203,20 @@ class CommandHandler extends Module {
 
 		for (let pref of prefixes) {
 			cmd = cmd.replace(pref, '');
-			msgContent = `${msgContent.replace(new RegExp(`^${this.utils.regEscape(pref)}`), '')}`;
+			msgContent = msgContent.replace(pref, '');
 		}
 
 		cmd = cmd.split(' ')[0].toLowerCase();
+
 		if (!cmd.length) return;
 
-		if (this.shouldCooldown(message)) return;
+		const cooldown = this.cooldowns.get(message.author.id);
+		if (cooldown && (Date.now() - cooldown) <= this.cooldown) return;
+
+		this.cooldowns.set(message.author.id, Date.now());
+
+		// ignore disabled commands
+		if (guildConfig.commands.hasOwnProperty(cmd) && guildConfig.commands[cmd] !== true) return;
 
 		const commands = this.rnet.commands;
 
@@ -295,22 +245,16 @@ class CommandHandler extends Module {
 		const command = commands.get(cmd);
 		const module = command.module || command.group;
 
+		// ignore disabled commands if an alias
+		if (guildConfig.commands.hasOwnProperty(command.name) && guildConfig.commands[command.name] !== true) return;
+
+		if (!this.commandGroupEnabled(module)) return;
+
 		if (this.rnet.modules.has(module) &&
 			(guildConfig.modules.hasOwnProperty(module) && guildConfig.modules[module] === false)) return;
 
-		if (globalConfig && globalConfig.commands.hasOwnProperty(cmd) && globalConfig.commands[cmd] === false) {
-			return;
-		}
-
 		if (globalConfig && globalConfig.modules.hasOwnProperty(module) && globalConfig.modules[module] === false) {
 			return;
-		}
-
-		if (guildConfig.commands.hasOwnProperty(command.name)) {
-			const commandOpts = guildConfig.commands[command.name];
-			if (commandOpts === false || commandOpts.enabled === false) {
-				return;
-			}
 		}
 
 		const isOverseer = this.isOverseer(message.member);
@@ -320,9 +264,6 @@ class CommandHandler extends Module {
 		if (!this.canExecute(command, e)) return;
 
 		const executeStart = Date.now();
-
-		const logEntry = `[C${this.rnet.clientOptions.clusterId}] [G${message.channel.guild.id}] Command: ${JSON.stringify(message)}`;
-		this.logCommand(logEntry);
 
 		// execute command
 		try {
@@ -336,11 +277,9 @@ class CommandHandler extends Module {
 			})
 			.then(() => {
 				const time = Date.now() - executeStart;
-				const isServerAdmin = this.isServerAdmin(message.member, message.channel);
-				const isServerMod   = this.isServerMod(message.member, message.channel);
-				commands.emit('command', { command, message, guildConfig, args, time, isServerAdmin, isServerMod });
+				commands.emit('command', { command, message, guildConfig, args, time });
 			})
-			.catch((err) => {
+			.catch(() => {
 				const time = Date.now() - executeStart;
 				commands.emit('error', { command, message, guildConfig, args, time });
 			});
@@ -361,24 +300,87 @@ class CommandHandler extends Module {
 	generateHelp({ message, guildConfig, isAdmin }) {
 		if (this.config.disableHelp) return;
 
-		let prefix = (guildConfig) ? guildConfig.prefix || this.config.prefix : this.config.prefix;
+		let author          = message.author,
+			isServerAdmin   = this.isServerAdmin(author, message.channel),
+			isServerMod     = this.isServerMod(author, message.channel),
+			globalConfig    = this.rnet.globalConfig,
+			prefix          = (guildConfig) ? guildConfig.prefix || this.config.prefix : this.config.prefix,
+			commands        = [...this.rnet.commands.values()],
+			msgArray        = [];
 
-		return this.client.getDMChannel(message.author.id).then(channel => {
-			if (!channel) {
-				return this.logger.error('Channel is undefined or null - ' + this.client.privateChannelMap[message.author.id]);
+		// filter commands that shouldn't be shown
+		commands = commands.filter(o =>
+			(!o.hideFromHelp && !o.disabled) && // disabled/hidden commands
+			(!o.permissions || // commands with no permissions
+				(isAdmin && o.permissions === 'admin') || // admin commands
+				(isServerAdmin && o.permissions === 'serverAdmin') ||  // server manager commands
+				(isServerMod && o.permissions === 'serverMod') // server mod commands
+			));
+
+		// remove duplicates
+		commands = [...new Set(commands)];
+
+		// group commands
+		commands = commands.reduce((a, o) => {
+			o.group = o.group || 'No Group';
+			const module = o.module || o.group;
+
+			// ignore disabled commands
+			if (guildConfig.commands.hasOwnProperty(o.name) && guildConfig.commands[o.name] !== true) return a;
+			// ignore commands for disabled modules
+			if (this.rnet.modules.has(module) &&
+				(guildConfig.modules.hasOwnProperty(module) && !guildConfig.modules[module])) return a;
+
+			if (globalConfig && globalConfig.modules.hasOwnProperty(module) && globalConfig.modules[module] === false) {
+				return a;
 			}
 
-			return this.sendMessage(channel, {
-					content: `The prefix for ${message.guild.name} is \`${prefix}\`\nYou can find a list of commands at <https://www.rnet.cf/commands>`,
-					embed: { description: this.footer.join('\n') },
-				})
-				.then(() => {
-					this.prom.register.getSingleMetric('rnet_app_messages_sent').inc({ type: 'dm' });
-					this.prom.register.getSingleMetric('rnet_app_help_sent').inc();
-				})
-				.catch(() => this.prom.register.getSingleMetric('rnet_app_help_failed').inc());
+			a[o.group] = a[o.group] || [];
+			a[o.group].push(o);
+
+			return a;
+		}, {});
+
+		for (let group in commands) {
+			let cmds = commands[group];
+
+			group = (!group || group === 'undefined') ? 'No Category' : group;
+
+			msgArray.push('');
+			msgArray.push(`**${group}**`);
+
+			for (const cmd of cmds) {
+				msgArray.push(`\t[${prefix}${utils.pad(cmd.name)}](${this.config.site.host}/commands#${cmd.group}) - ${cmd.description}`);
+				if (cmd.commands) {
+					for (const c of cmd.commands)
+					msgArray.push(`\t\t[${prefix}${cmd.name} ${c.name}](${this.config.site.host}/commands#${cmd.group}) - ${c.desc}`);
+				}
+			}
+		}
+
+		msgArray.shift();
+		msgArray = utils.splitMessage(msgArray, 1950);
+
+		this.client.getDMChannel(message.author.id).then(channel => {
+			if (!channel) {
+				this.logger.error('Channel is undefined or null - ' + this.client.privateChannelMap[message.author.id]);
+			}
+
+			for (let message of msgArray) {
+				this.sendMessage(channel, { embed: {
+					description: message,
+					author: {
+						name: 'Commands',
+						icon_url: `${this.config.site.host}/${this.config.avatar}`,
+					},
+				} }).then(() => statsd.increment(`messages.dm`));
+			}
+
+			this.sendMessage(channel, { embed: { description: this.footer.join('\n') } })
+				.then(() => statsd.increment(['messages.dm', 'help.sent']))
+				.catch(() => statsd.increment('help.failed'));
 		}).catch(err => {
-			this.prom.register.getSingleMetric('rnet_app_help_failed').inc();
+			statsd.increment('help.failed');
 			this.logger.error(err);
 		});
 	}
@@ -395,7 +397,7 @@ class CommandHandler extends Module {
 			message: message.cleanContent,
 		};
 
-		let log = new this.models.OverrideLog(doc);
+		let log = new OverrideLog(doc);
 		log.save(err => err ? this.logger.error(err) : false);
 	}
 }

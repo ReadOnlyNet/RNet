@@ -1,6 +1,6 @@
 'use strict';
 
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
 
 class RoleInfo extends Command {
 	constructor(...args) {
@@ -28,7 +28,7 @@ class RoleInfo extends Command {
 
 		let members = guild.members.filter(m => m.roles.includes(role.id));
 
-		const color = role.color ? ('00000' + role.color.toString(16)).slice(-6) : null;
+		const color = role.color ? role.color.toString(16) : null;
 
 		const embed = {
 			fields: [
@@ -48,9 +48,8 @@ class RoleInfo extends Command {
 		};
 
 		if (color) {
-			const colorurl = `${this.config.colorapi.host}/color/${color}/80x80.png`;
 			embed.color = role.color;
-			embed.thumbnail = { url: colorurl };
+			embed.thumbnail = { url: `https://dummyimage.com/80x80/${color}/${color}.jpg` };
 		}
 
 		return this.sendMessage(message.channel, { embed });

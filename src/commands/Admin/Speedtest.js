@@ -1,7 +1,7 @@
 'use strict';
 
 const { exec } = require('child_process');
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
 
 class Speedtest extends Command {
 	constructor(...args) {

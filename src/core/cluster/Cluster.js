@@ -33,11 +33,10 @@ class Cluster extends EventEmitter {
 		super();
 
 		this.id = options.id;
-		this.options = options;
-		this.shardCount = options.shardCount;
-		this.firstShardId = options.firstShardId;
-		this.lastShardId = options.lastShardId;
-		this.clusterCount = options.clusterCount;
+		this.shardCount = options.shardCount || null;
+		this.firstShardId = options.firstShardId || null;
+		this.lastShardId = options.lastShardId || null;
+		this.clusterCount = options.clusterCount || null;
 
 		this.worker = this.createWorker();
 		this.process = this.worker.process;
@@ -48,13 +47,14 @@ class Cluster extends EventEmitter {
 	 * Create a cluster worker
 	 * @return {Object} The worker process reference
 	 */
-	createWorker(awaitReady = false) {
-		const worker = cluster.fork(
-			Object.assign({
-				awaitReady: awaitReady,
-				clusterId: this.id,
-			}, this.options)
-		);
+	createWorker() {
+		const worker = cluster.fork({
+			clusterId: this.id,
+			shardCount: this.shardCount,
+			clusterCount: this.clusterCount,
+			firstShardId: this.firstShardId,
+			lastShardId: this.lastShardId,
+		});
 
 		this._pid = worker.process.pid;
 
@@ -72,26 +72,20 @@ class Cluster extends EventEmitter {
 	/**
 	 * Restart a cluster worker
 	 */
-	restartWorker(awaitReady = false) {
-		const worker = this.createWorker(awaitReady);
-		const oldWorker = this.worker;
+	restartWorker() {
+		const worker = this.createWorker();
 		this._pid = worker.process.pid;
 
 		return new Promise(resolve => {
 			this.on('ready', () => {
-				if (this.worker) {
-					oldWorker.kill('SIGTERM');
-				}
+				this.worker.kill('SIGTERM');
+				this.worker = worker;
+				this.process = worker.process;
+				this.pid = worker.pid;
+				// this.worker.removeListener('ready', this._readyListener);
+				this.worker.removeListener('shardReady', this._shardReadyListener);
 
-				process.nextTick(() => {
-					this.worker = worker;
-					this.process = worker.process;
-					this.pid = worker.pid;
-					// this.worker.removeListener('ready', this._readyListener);
-					this.worker.removeListener('shardReady', this._shardReadyListener);
-
-					return resolve();
-				});
+				return resolve();
 			});
 		});
 	}

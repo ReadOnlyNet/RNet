@@ -1,11 +1,9 @@
 'use strict';
 
-const each = require('async-each');
-const glob = require('glob-promise');
-const minimatch = require('minimatch');
-const { EventCollection, utils } = require('@rnet.cf/rnet-core');
-const { models } = require('../database');
-const logger = require('../logger');
+const EventCollection = requireReload(require)('../interfaces/EventCollection');
+const logger = requireReload(require)('../logger');
+const utils = requireReload(require)('../utils');
+const models = require('../../core/models');
 
 /**
  * @class CommandCollection
@@ -31,36 +29,13 @@ class CommandCollection extends EventCollection {
 	 * Load commands
 	 */
 	async loadCommands() {
-		try {
-			var [files, moduleFiles] = await Promise.all([
-				glob('**/*.js', {
-					cwd: this._config.paths.commands,
-					root: this._config.paths.commands,
-					absolute: true,
-				}),
-				glob('**/*.js', {
-					cwd: this._config.paths.modules,
-					root: this._config.paths.modules,
-					absolute: true,
-				}),
-			]);
+		const files = await utils.readdirRecursive(this._config.paths.commands);
 
-			moduleFiles = moduleFiles.filter(minimatch.filter('**/commands/*.js'));
-			files = files.concat(moduleFiles);
-		} catch (err) {
-			logger.error(err);
+		for (const file of files) {
+			this.register(requireReload(file));
 		}
 
-		utils.asyncForEach(files, file => {
-			if (!file.endsWith('.js')) return;
-			let load = () => {
-				var command = require(file);
-				this.register(command);
-			};
-			load();
-			// utils.time(load, file);
-			return;
-		});
+		logger.info(`Registered ${this.size} commands.`);
 	}
 
 	/**
@@ -68,17 +43,17 @@ class CommandCollection extends EventCollection {
 	 * @param {Function} Command A Command class to register
 	 */
 	register(Command) {
-		if (Object.getPrototypeOf(Command).name !== 'Command') {
-			return logger.debug('[CommandCollection] Skipping unknown command');
+		if (typeof Command !== 'function') {
+			logger.debug('Skipping unknown command');
+			return;
 		}
 
 		// create the command
-		let command = new Command(this.rnet);
+		let command = new Command(this._config, this.rnet);
 
 		// ensure command defines all required properties/methods
+		command.ensureInterface();
 		command.name = command.aliases[0];
-
-		logger.debug(`[CommandCollection] Registering command ${command.name}`);
 
 		models.Command.update({ name: command.name, _state: this._config.state }, command.toJSON(), { upsert: true })
 			.catch(err => logger.error(err));

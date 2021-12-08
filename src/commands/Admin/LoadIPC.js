@@ -2,7 +2,8 @@
 
 const path = require('path');
 const util = require('util');
-const {Command} = require('@rnet.cf/rnet-core');
+const utils = Loader.require('./core/utils');
+const Command = Loader.require('./core/structures/Command');
 
 class LoadIPC extends Command {
 	constructor(...args) {
@@ -22,7 +23,7 @@ class LoadIPC extends Command {
 		let filePath = path.join(this.config.paths.ipc, args[0]);
 		filePath = filePath.endsWith('.js') ? filePath : filePath + '.js';
 
-		if (!this.utils.existsSync(filePath)) {
+		if (!utils.existsSync(filePath)) {
 			return this.error(message.channel, `File does not exist: ${filePath}`);
 		}
 

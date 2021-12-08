@@ -7,7 +7,7 @@ const Logger = require('./Logger');
 const Sharding = require('./Sharding');
 const Server = require('./Server');
 const config = require('../config');
-const { Collection } = require('@rnet.cf/rnet-core');
+const Collection = require('../interfaces/Collection');
 
 /**
  * @class Manager
@@ -23,13 +23,12 @@ class Manager {
 
 		this.shardCount = config.shardCountOverride || os.cpus().length;
 
-		process.on('uncaughtException', this.handleException.bind(this));
 		process.on('unhandledRejection', this.handleRejection.bind(this));
 
 		this.logger = new Logger(this);
 		this.events = new Events(this);
 		this.sharding = new Sharding(this);
-		this.server = new Server(this);
+		this.webhook = new Server(this);
 
 		strategy = strategy || config.shardingStrategy;
 
@@ -53,18 +52,6 @@ class Manager {
 			console.error('Unhandled rejection at: Promise ', p, 'reason: ', reason); // eslint-disable-line
 		} catch (err) {
 			console.error(reason); // eslint-disable-line
-		}
-	}
-
-	handleException(err) {
-		if (!err || (typeof err === 'string' && !err.length)) {
-			return logger.error('An undefined exception occurred.');
-		}
-
-		try {
-			logger.error(err);
-		} catch (e) {
-			console.error(err); // eslint-disable-line
 		}
 	}
 
@@ -96,8 +83,7 @@ class Manager {
 		const cluster = new Cluster(this, options);
 		this.clusters.set(parseInt(cluster.id), cluster);
 
-		return cluster;
-		// return this.awaitReady(cluster);
+		return this.awaitReady(cluster);
 	}
 
 	/**
@@ -158,27 +144,14 @@ class Manager {
 		const cluster = this.getCluster(worker);
 
 		if (signal && signal === 'SIGTERM') return;
-		if (!cluster) return;
 
 		const meta = cluster.firstShardId !== null ? `${cluster.firstShardId}-${cluster.lastShardId}` : cluster.id.toString();
 
-		this.logger.log(`Cluster ${cluster.id} died with code ${signal || code}, restarting...`, [
+		this.logger.log(`Cluster ${cluster.id} died with code ${signal || code}, queueing restart...`, [
 			{ name: 'Shards', value: meta },
 		]);
 
-		// process.nextTick(() => {
-		// 	this.logger.log(`Cluster ${cluster.id} restarting...`);
-		// });
-
-		cluster.restartWorker().then(() => {
-			this.queue.shift();
-			this.logger.log(`Cluster ${cluster.id} ready.`);
-			if (this.queue.length > 0) {
-				this.processQueue();
-			}
-		});
-
-		// this.queueCluster(cluster);
+		this.queueCluster(cluster);
 	}
 }
 

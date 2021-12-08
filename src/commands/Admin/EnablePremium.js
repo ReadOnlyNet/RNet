@@ -1,6 +1,6 @@
 'use strict';
 
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
 
 class EnablePremium extends Command {
 
@@ -35,16 +35,11 @@ class EnablePremium extends Command {
 		return false;
 	}
 
-	async execute({ message, args }) {
-		let user = this.resolveUser(message.guild, args.slice(1).join(' '));
+	execute({ message, args }) {
+		const user = this.resolveUser(message.guild, args.slice(1).join(' '));
 
 		if (!user) {
-			if (!isNaN(args[0])) {
-				user = await this.restClient.getRESTUser(args[0]);
-			}
-			if (!user) {
-				return this.error(message.channel, 'Unable to find that user.');
-			}
+			return this.error(message.channel, 'Unable to find that user.');
 		}
 
 		const logChannel = this.client.getChannel('231484392365752320');
@@ -54,7 +49,7 @@ class EnablePremium extends Command {
 			return this.error(message.channel, 'Unable to find log channel.');
 		}
 
-		return this.rnet.guilds.update(args[0], { $set: { vip: true, isPremium: true, premiumUserId: user.id, premiumSince: new Date().getTime() } })
+		return this.rnet.guilds.update(args[0], { $set: { vip: true, isPremium: true } })
 			.then(async () => {
 				try {
 					var doc = await this.models.Server.findOne({ _id: args[0] }).lean().exec();
@@ -78,20 +73,6 @@ class EnablePremium extends Command {
 					],
 					timestamp: new Date(),
 				};
-
-				const logDoc = {
-					serverID: doc._id,
-					serverName: doc.name,
-					ownerID: doc.ownerID,
-					userID: user.id,
-					username: this.utils.fullName(user),
-					memberCount: doc.memberCount || 0,
-					region: doc.region || 'Unknown',
-					timestamp: new Date().getTime(),
-					type: 'enable',
-				}
-				
-				await this.rnet.db.collection('premiumactivationlogs').insert(logDoc);
 
 				this.sendMessage(dataChannel, { embed })
 				message.delete().catch(() => false);

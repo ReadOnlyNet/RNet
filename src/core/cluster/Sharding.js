@@ -1,7 +1,8 @@
 'use strict';
 
 const os = require('os');
-const Eris = require('@rnet.cf/eris');
+const Eris = require('eris');
+const superagent = require('superagent');
 const config = require('../config');
 const logger = require('../logger');
 
@@ -51,7 +52,7 @@ class Sharding {
 	 * Create clusters sequentially
 	 */
 	async process() {
-		const shardCount = config.shardCountOverride || await this.getShardCount();
+		const shardCount = await this.getShardCount();
 
 		const shardIds = config.shardIds || [];
 
@@ -67,7 +68,7 @@ class Sharding {
 				id: i,
 				shardCount,
 			});
-			await new Promise(res => setTimeout(res, 6500));
+			await Promise.delay(6500);
 		}
 	}
 
@@ -75,7 +76,7 @@ class Sharding {
 	 * Create a shared state instance
 	 */
 	async shared() {
-		const shardCount = config.shardCountOverride || await this.getShardCount();
+		const shardCount = await this.getShardCount();
 
 		this.shardCount = shardCount;
 		this.manager.events.register();
@@ -90,28 +91,6 @@ class Sharding {
 		});
 	}
 
-	chunkArray(arr, chunkCount) {
-		const arrLength = arr.length;
-		const tempArray = [];
-		let chunk = [];
-
-		const chunkSize = Math.floor(arr.length / chunkCount);
-		let mod = arr.length % chunkCount;
-		let tempChunkSize = chunkSize;
-
-		for (let i = 0; i < arrLength; i += tempChunkSize) {
-			tempChunkSize = chunkSize;
-			if (mod > 0) {
-				tempChunkSize = chunkSize + 1;
-				mod--;
-			}
-			chunk = arr.slice(i, i + tempChunkSize);
-			tempArray.push(chunk);
-		}
-
-		return tempArray;
-	}
-
 	/**
 	 * Create shards balanced across all cores
 	 * @param  {Boolean|undefined} semi If false, round up to a multiple of core count
@@ -121,15 +100,22 @@ class Sharding {
 		const len = config.clusterCount || os.cpus().length;
 
 		let firstShardId = config.firstShardOverride || 0,
-			lastShardId = config.lastShardOverride || (shardCount - 1);
+			lastShardId = config.lastShardOverride || 0;
 
 		const localShardCount = config.shardCountOverride ? (lastShardId + 1) - firstShardId : shardCount;
 
-		const shardIds = [...Array(1 + lastShardId - firstShardId).keys()].map(v => firstShardId + v);
-		// const clusterShardCount = Math.ceil(shardIds.length / len);
-		const shardCounts = this.chunkArray(shardIds, len);
+		let shardCounts = [];
+		let mod = localShardCount % len;
 
 		this.shardCount = shardCount;
+
+		for (let i = 0; i < len; i++) {
+			shardCounts[i] = Math.floor(localShardCount / len);
+			if (mod > 0) {
+				shardCounts[i]++;
+				mod--;
+			}
+		}
 
 		this.manager.events.register();
 		this.logger.log(`[Sharding] Starting with ${localShardCount} shards in ${len} clusters.`);
@@ -137,7 +123,7 @@ class Sharding {
 		const clusterIds = config.clusterIds || [];
 
 		for (let i in shardCounts) {
-			const count = shardCounts[i].length;
+			const count = shardCounts[i];
 			lastShardId = (firstShardId + count) - 1;
 
 			if (clusterIds.length && !clusterIds.includes(i.toString())) {
@@ -146,11 +132,11 @@ class Sharding {
 			}
 
 			await this.manager.createCluster({
-				id: i.toString(),
-				clusterCount: len.toString(),
-				shardCount: shardCount.toString(),
-				firstShardId: firstShardId.toString(),
-				lastShardId: lastShardId.toString(),
+				id: i,
+				clusterCount: len,
+				shardCount,
+				firstShardId,
+				lastShardId,
 			});
 
 			firstShardId += count;
@@ -188,7 +174,47 @@ class Sharding {
 	 */
 	async fetchGuildCount() {
 		let res, guildCount;
+
 		guildCount = await this.getEstimatedGuilds();
+
+		if (guildCount) return guildCount;
+
+		try {
+			res = await superagent
+				.get(config.dbots.url)
+				.set('Authorization', config.dbots.key)
+				.set('Accept', 'application/json')
+				.timeout(5000);
+
+			if (!res || !res.body || !res.body.stats) {
+				throw new Error(`Invalid response from Carbonitex`);
+			}
+
+			guildCount = res.body.stats.reduce((a, b) => {
+				a += b.server_count;
+				return a;
+			}, 0);
+
+			if (!guildCount || isNaN(guildCount)) {
+				throw new Error('Unable to get guild count.');
+			}
+		} catch (err) {
+			res = await superagent
+				.get(config.carbon.info)
+				.set('Accept', 'application/json')
+				.timeout(5000);
+
+			if (!res || !res.body) {
+				throw new Error(`Invalid response from bots.discord.pw`);
+			}
+
+			guildCount = res.body.servercount || res.body.server_count || null;
+
+			if (!guildCount || isNaN(guildCount)) {
+				throw new Error('Unable to get guild count.');
+			}
+		}
+
 		return guildCount;
 	}
 

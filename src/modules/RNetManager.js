@@ -1,6 +1,9 @@
 'use strict';
 
-const { Module } = require('@rnet.cf/rnet-core');
+const Module = Loader.require('./core/structures/Module');
+const utils = Loader.require('./core/utils');
+const { Server, GuildLog } = require('../core/models');
+const redis = require('../core/redis');
 
 /**
  * RNetManager module
@@ -8,8 +11,8 @@ const { Module } = require('@rnet.cf/rnet-core');
  * @extends Module
  */
 class RNetManager extends Module {
-	constructor(...args) {
-		super(...args);
+	constructor() {
+		super();
 
 		this.module = 'RNetManager';
 		this.description = 'RNet manager.';

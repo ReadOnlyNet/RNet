@@ -1,7 +1,7 @@
 'use strict';
 
 const moment = require('moment');
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
 
 class DisablePremium extends Command {
 
@@ -16,7 +16,7 @@ class DisablePremium extends Command {
 		this.overseerEnabled = true;
 		this.hideFromHelp = true;
 		this.permissions  = 'admin';
-		this.expectedArgs = 1;
+		this.expectedArgs = 2;
 	}
 
 	permissionsFn({ message }) {
@@ -37,33 +37,8 @@ class DisablePremium extends Command {
 	}
 
 	async execute({ message, args }) {
-		let resolvedUser = await this.resolveUser(message.guild, args[0]);
-		if (!resolvedUser) {
-			try {
-				resolvedUser = await this.rnet.restClient.getRESTUser(args[0]);
-			} catch (err) {
-				// pass
-			}
-		}
+		const reason = args.slice(1).join(' ');
 
-		if (resolvedUser) {
-			try {
-				const guilds = await this.models.Server.find({ premiumUserId: resolvedUser.id }, { _id: 1 });
-				if (!guilds || !guilds.length) {
-					return this.sendMessage(message.channel, `That user has no premium guilds.`);
-				}
-				await Promise.all(guilds.map(g => this.disableGuild(message, g._id)));
-				return this.success(message.channel, `Disabled ${guilds.length} guilds for ${resolvedUser.username}#${resolvedUser.discriminator}`);
-			} catch (err) {
-				this.logger.error(err);
-				return this.error(message.channel, `Error: ${err.message}`);
-			}
-		} else {
-			return this.disableGuild(message, args[0]);
-		}
-	}
-
-	async disableGuild(message, guildId) {
 		const logChannel = this.client.getChannel('231484392365752320');
 		const dataChannel = this.client.getChannel('301131818483318784');
 
@@ -72,35 +47,21 @@ class DisablePremium extends Command {
 		}
 
 		try {
-			await this.rnet.guilds.update(guildId, { $unset: { vip: 1, isPremium: 1, premiumUserId: 1, premiumSince: 1 } });
+			await this.rnet.guilds.update(args[0], { $unset: { vip: 1, isPremium: 1 } });
 		} catch (err) {
 			this.logger.error(err);
 			return this.error(message.channel, `Error: ${err.message}`);
 		}
 
 		try {
-			var doc = await this.models.Server.findOne({ _id: guildId }).lean().exec();
+			var doc = await this.models.Server.findOne({ _id: args[0] }).lean().exec();
 		} catch (e) {
 			this.logger.error(e);
-			return this.error(message.channel, `Error: ${e.message}`);
+			return this.error(message.channel, `Error: ${err.message}`);
 		}
 
-		this.success(logChannel, `[**${this.utils.fullName(message.author)}**] Disabled Premium on **${doc.name} (${doc._id})**`);
-		this.success(message.channel, `Disabled RNet Premium on ${doc.name}`);
-		
-		message.delete().catch(() => false);
-		
-		const logDoc = {
-			serverID: doc._id,
-			serverName: doc.name,
-			ownerID: doc.ownerID,
-			userID: doc.premiumUserId || 'Unknown',
-			timestamp: new Date().getTime(),
-			type: 'disable',
-		}
-		
-		await this.rnet.db.collection('premiumactivationlogs').insert(logDoc);
-		return Promise.resolve();
+		this.success(logChannel, `[**${this.utils.fullName(message.author)}**] Disabled Premium on **${doc.name} (${doc._id})** ${reason}`);
+		this.success(message.channel, `Disabled RNet Premium on ${doc.name} ${reason}`);
 
 		try {
 			var messages = await this.client.getMessages(dataChannel.id, 500);
@@ -108,6 +69,8 @@ class DisablePremium extends Command {
 			this.logger.error(e);
 			return this.error(message.channel, `Error: ${err.message}`);
 		}
+
+		message.delete().catch(() => false);
 
 		if (!messages || !messages.length) {
 			return Promise.resolve();
@@ -118,7 +81,7 @@ class DisablePremium extends Command {
 
 			if (embed.fields.find(f => f.name === 'Server ID' && f.value === doc._id)) {
 				embed.fields.push({ name: 'Disabled', value: moment().format('llll'), inline: true });
-				// embed.fields.push({ name: 'Reason', value: reason, inline: true });
+				embed.fields.push({ name: 'Reason', value: reason, inline: true });
 			}
 			
 			return msg.edit({ embed }).catch(err => this.logger.error(err));
@@ -127,4 +90,3 @@ class DisablePremium extends Command {
 }
 
 module.exports = DisablePremium;
-

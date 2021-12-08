@@ -2,10 +2,11 @@
 const util = require('util');
 const Raven = require('raven');
 const winston = require('winston');
+const _ = require('lodash');
 const config = require('../config');
 
 var Sentry = winston.transports.Sentry = function (options) {
-  winston.Transport.call(this, { level: options.level });
+  winston.Transport.call(this, _.pick(options, 'level'));
 
   // Default options
   this.defaults = {
@@ -28,7 +29,7 @@ var Sentry = winston.transports.Sentry = function (options) {
   // For backward compatibility with deprecated `globalTags` option
   options.tags = options.tags || options.globalTags;
 
-  this.options = Object.assign({}, this.defaults, options);
+  this.options = _.defaultsDeep(options, this.defaults);
 
   Raven.config(this.options.dsn, this.options);
 
@@ -57,7 +58,7 @@ Sentry.prototype.log = function (level, msg, meta, callback) {
   level = this.options.levelsMap[level];
   meta = meta || {};
 
-  var extraData = Object.assign({}, meta),
+  var extraData = _.extend({}, meta),
       tags = extraData.tags;
   delete extraData.tags;
 

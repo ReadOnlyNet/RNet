@@ -1,6 +1,6 @@
 'use strict';
 
-const { utils } = require('@rnet.cf/rnet-core');
+const utils = require('../core/utils');
 
 module.exports = function messageCreate(dispatcher, message) {
 	if (!dispatcher.rnet.isReady || (message.author && message.author.bot)) return Promise.reject();
@@ -19,13 +19,6 @@ module.exports = function messageCreate(dispatcher, message) {
 	}
 
 	return dispatcher.rnet.guilds.getOrFetch(message.channel.guild.id).then(guildConfig => { // eslint-disable-line
-		const guild = message.channel.guild;
-		if (!guild.cacheMessages && (guildConfig.actionlog || guildConfig.modules.Automod !== false)) {
-			if (guildConfig.modules.Automod !== false || guildConfig.actionlog.messageDelete || guildConfig.actionlog.messageEdit) {
-				guild.cacheMessages = true;
-			}
-		}
-
 		return {
 			message: message,
 			guild: message.channel.guild,

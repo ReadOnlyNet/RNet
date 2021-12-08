@@ -1,9 +1,9 @@
 'use strict';
 
-const { utils } = require('@rnet.cf/rnet-core');
 const EventEmitter = require('eventemitter3');
-const each = require('async-each');
 const logger = require('../logger');
+
+let utils;
 
 /**
  * @class IPCManager
@@ -23,24 +23,25 @@ class IPCManager extends EventEmitter {
 
 		const config = this._config = rnet.config;
 
-		this.rnet = rnet;
-		this.client = rnet.client;
+		this._rnet = rnet;
+		this._client = rnet.client;
 
-		this.id = rnet.clientOptions.clusterId || rnet.clientOptions.shardId || 0;
+		this.id = rnet.options.clusterId || rnet.options.shardId || 0;
 		this.pid = process.pid;
 		this.commands = new Map();
+
+		// defining this here because of weirdness I haven't figured out yet
+		utils = require('../utils');
 
 		process.on('message', this.onMessage.bind(this));
 
 		utils.readdirRecursive(this._config.paths.ipc).then(files => {
-			each(files, (file, next) => {
-				if (file.endsWith('.map')) return next();
-				this.register(require(file));
-				return next();
-			}, err => {
-				if (err) logger.error(err);
-				logger.info(`[IPCManager] Registered ${this.commands.size} IPC commands.`);
-			});
+			for (let file of files) {
+				const command = require(file);
+				this.register(command);
+			}
+
+			logger.info(`Registered ${this.commands.size} IPC commands.`);
 		}).catch(err => logger.error(err));
 	}
 
@@ -51,14 +52,10 @@ class IPCManager extends EventEmitter {
 	 */
 	send(event, data) {
 		if (!process.send) return;
-		try {
-			process.send({
-				op: event,
-				d: data || null,
-			});
-		} catch (err) {
-			logger.error(`IPC Error Caught:`, err);
-		}
+		process.send({
+			op: event,
+			d: data || null,
+		});
 	}
 
 	/**
@@ -67,29 +64,20 @@ class IPCManager extends EventEmitter {
 	 * @returns {*}
 	 */
 	onMessage(message) {
-		// op for internal rnet messages, type for prom-client cluster messages
-		if (!message.op && !message.type) {
-			return logger.warn('Received IPC message with no op or type.');
+		if (!message.op) {
+			return logger.warn('Received IPC message with no op.');
 		}
 
 		if (['resp', 'broadcast'].includes(message.op)) return;
 
 		if (this[message.op]) {
-			try {
-				return this[message.op](message);
-			} catch (err) {
-				return this.logger.error(err);
-			}
+			return this[message.op](message);
 		}
 
 		const command = this.commands.get(message.op);
 
-		if (!command) return;
-
-		try {
-			return command(this.rnet, this._config, message);
-		} catch (err) {
-			this.logger.error(err);
+		if (command) {
+			return command(this._rnet, this._config, message);
 		}
 
 		this.emit(message.op, message.d);
@@ -118,11 +106,7 @@ class IPCManager extends EventEmitter {
 			if (d) payload.d = d;
 
 			process.on('message', awaitListener);
-			try {
-				process.send(payload);
-			} catch (err) {
-				logger.error(`IPC Error Caught:`, err);
-			}
+			process.send(payload);
 
 			setTimeout(() => {
 				process.removeListener('message', awaitListener);
@@ -137,8 +121,7 @@ class IPCManager extends EventEmitter {
 	 * @returns {*|void}
 	 */
 	register(command) {
-		if (!command || !command.name) return logger.error('[IPCManager] Invalid command.');
-		logger.debug(`[IPCManager] Registering ipc command ${command.name}`);
+		if (!command || !command.name) return logger.error('Invalid command.');
 		this.commands.set(command.name, command);
 	}
 }

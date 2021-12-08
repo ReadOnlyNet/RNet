@@ -1,6 +1,7 @@
 'use strict';
 
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
+const models = require('../../core/models');
 
 class Changelog extends Command {
 
@@ -19,7 +20,7 @@ class Changelog extends Command {
 	}
 
 	execute({ message, args }) {
-		return this.models.Changelog.insert({ entry: args.join(' ') })
+		return models.Changelog.insert({ entry: args.join(' ') })
 			.then(() => this.success(message.channel, `Entry added.`))
 			.catch(err => this.error(message.channel, err));
 	}

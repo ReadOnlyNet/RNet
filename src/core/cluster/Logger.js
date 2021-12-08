@@ -1,6 +1,6 @@
 'use strict';
 
-const axios = require('axios');
+const superagent = require('superagent');
 const config = require('../config');
 const logger = require('../logger');
 
@@ -77,7 +77,7 @@ class Logger {
 
 		const payload = {
             username: username,
-            avatar_url: `${config.avatar}`,
+            avatar_url: `${config.site.host}/${config.avatar}`,
             embeds: [],
             tts: false,
         };
@@ -113,16 +113,15 @@ class Logger {
 	 * @return {Promise}
 	 */
 	postWebhook(webhook, payload) {
-		return new Promise((resolve, reject) =>
-			axios.post(webhook, {
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				...payload
-			})
-			.then(resolve)
-			.catch(reject));
+		return new Promise((resolve, reject) => {
+			superagent
+				.post(webhook)
+				.set('Content-Type', 'application/json')
+				.set('Accept', 'application/json')
+				.send(payload)
+				.then(resolve)
+				.catch(reject);
+			});
 	}
 }
 

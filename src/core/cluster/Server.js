@@ -2,7 +2,7 @@
 
 const http = require('http');
 const config = require('../config');
-const { models } = require('../database');
+const models = require('../models');
 const logger = require('../logger');
 
 /**
@@ -21,7 +21,7 @@ class Server {
 		this.nextSocketId = 0;
 
 		this.server = http.createServer(this.handleRequest.bind(this))
-			.listen(5000);
+			.listen(config.webhook.port || 5000);
 
 		this.server.on('connection', socket => {
 			let socketId = this.nextSocketId++;
@@ -30,6 +30,9 @@ class Server {
 				delete this.sockets[socketId];
 			});
 		});
+
+		this.registerWebhook()
+			.catch(err => { throw new Error(err); });
 	}
 
 	unload() {
@@ -37,6 +40,23 @@ class Server {
 		for (var socketId in this.sockets) {
 			this.sockets[socketId].destroy();
 		}
+	}
+
+	async registerWebhook() {
+		try {
+			var doc = await models.RNet.findOne().lean().exec();
+		} catch (err) {
+			throw new Error(err);
+		}
+
+		const webhook = `${config.webhook.host}:${config.webhook.port}`;
+
+		if (doc.webhooks && doc.webhooks.includes(webhook)) return;
+
+		doc.webhooks = doc.webhooks || [];
+		doc.webhooks.push(webhook);
+
+		return models.RNet.update({ _id: doc._id }, { $set: { webhooks: doc.webhooks } });
 	}
 
 	handleRequest(req, res) {
@@ -84,44 +104,41 @@ class Server {
 		return this.end(res, 200, 'Pong!');
 	}
 
-	getShards({ res }) {
-		return this.events.awaitResponse(null, { op: 'shards' })
+	postPing({ res }) {
+		return this.events.awaitResponse(null, { op: 'ping' })
 			.then(data => this.end(res, 200, data))
 			.catch(err => this.end(res, 500, err));
 	}
 
-	async postRestart({ res, body }) {
-		if (!body) return this.end(res, 500, 'Invalid request 0');
-
-		try {
-			body = JSON.parse(body);
-		} catch (err) {
-			return this.end(res, 500, err);
-		}
-
-		if (!body.token || body.id == undefined) return this.end(res, 500, 'Invalid request 1');
-
-		const restartToken = config.restartToken;
-		if (body.token !== restartToken) return this.end(res, 403, 'Forbidden');
-
-		if (body.id === 'all') {
-			for (const cluster of this.manager.clusters.values()) {
-				cluster.restartWorker(true);
-				await this.manager.awaitReady(cluster);
-			}
-
-			return this.end(res, 200, 'OK');
-		}
-
-		const cluster = this.manager.clusters.get(parseInt(body.id));
-		if (!cluster) return this.end(res, 404, 'Cluster not found');
-		cluster.restartWorker(true);
-		return this.end(res, 200, 'OK');
+	postToken({ res, body }) {
+		return this.events.awaitResponse(null, { op: 'settoken', d: body })
+			.then(data => this.end(res, 200, data))
+			.catch(err => this.end(res, 500, err));
 	}
 
-	postPing({ res }) {
-		return this.events.awaitResponse(null, { op: 'ping' })
+	postLoadmod({ res, body }) {
+		return this.events.awaitResponse(null, { op: 'reload', d: { type: 'modules', name: body } })
 			.then(data => this.end(res, 200, data))
+			.catch(err => this.end(res, 500, err));
+	}
+
+	postLoadcmds({ res }) {
+		return this.events.awaitResponse(null, { op: 'reloadcmds', d: null })
+			.then(data => this.end(res, 200, data))
+			.catch(err => this.end(res, 500, err));
+	}
+
+	postDiscrim({ res, body }) {
+		if (!body) return this.end(res, 500, 'Invalid request');
+		this.events.awaitResponse(null, { op: 'discrim', d: body })
+			.then(data => {
+				if (!data || !data.length) return this.end(res, 200, []);
+				data = data.reduce((a, b) => {
+					a = a.concat(b.result);
+					return a;
+				}, []);
+				return this.end(res, 200, [...new Set(data)]);
+			})
 			.catch(err => this.end(res, 500, err));
 	}
 

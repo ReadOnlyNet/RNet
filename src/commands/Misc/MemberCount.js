@@ -1,6 +1,6 @@
 'use strict';
 
-const { Command } = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
 
 class MemberCount extends Command {
 	constructor(...args) {
@@ -36,13 +36,10 @@ class MemberCount extends Command {
 
 		let fields = [
 			{ name: 'Members', value: guild.memberCount.toString(), inline: true },
+			{ name: 'Online', value: guild.members.filter(m => m.status !== 'offline').length.toString(), inline: true },
 			{ name: 'Humans', value: guild.members.filter(m => !m.bot).length.toString(), inline: true },
 			{ name: 'Bots', value: guild.members.filter(m => m.bot).length.toString(), inline: true },
 		]
-
-		if (this.config.isPremium) {
-			fields.push({ name: 'Online', value: guild.members.filter(m => m.status !== 'offline').length.toString(), inline: true });
-		}
 
 		if (pruneCount) {
 			fields.push({ name: 'Prune Count', value: pruneCount.toString(), inline: true });
@@ -53,7 +50,6 @@ class MemberCount extends Command {
 		}
 
 		const embed = {
-			color: this.utils.getColor('blue'),
 			fields: fields,
 			timestamp: new Date(),
 		};

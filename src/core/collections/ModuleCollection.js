@@ -1,12 +1,13 @@
 'use strict';
 
-const each = require('async-each');
-const glob = require('glob-promise');
-const minimatch = require('minimatch');
+const fs = require('fs');
+const path = require('path');
 const jsonSchema = require('mongoose_schema-json');
-const { Collection, utils } = require('@rnet.cf/rnet-core');
-const { models } = require('../database');
-const logger = require('../logger');
+const Collection = requireReload(require)('../interfaces/Collection');
+const logger = requireReload(require)('../logger');
+const models = require('../models');
+const { Server } = models;
+
 
 /**
  * @class ModuleCollection
@@ -24,7 +25,6 @@ class ModuleCollection extends Collection {
 		this.rnet = rnet;
 		this._client = rnet.client;
 		this._config = config;
-		this._listenerCount = 0;
 
 		this.moduleList = this._config.moduleList || [];
 
@@ -41,77 +41,32 @@ class ModuleCollection extends Collection {
 	/**
 	 * Load commands
 	 */
-	async loadModules() {
-		try {
-			var files = await glob('**/*.js', {
-				cwd: this._config.paths.modules,
-				root: this._config.paths.modules,
-				absolute: true,
-			});
-			files = files.filter(f => !minimatch(f, '**/commands/*'));
-		} catch (err) {
-			logger.error(err);
+	loadModules() {
+		const files = fs.readdirSync(this._config.paths.modules);
+
+		for (let file of files) {
+			this.register(requireReload(path.join(this._config.paths.modules, file)));
 		}
 
-		let modules = [];
-
-		each(files, (file, next) => {
-			if (file.endsWith('.map')) return next();
-
-			const module = require(file);
-
-			if (module.hasModules) {
-				modules = modules.concat(Object.values(module.modules));
-				return next();
-			}
-
-			modules.push(require(file));
-			return next();
-		}, err => {
-			if (err) {
-				logger.error(err);
-			}
-
-			utils.asyncForEach(modules, (module, next) => {
-				this.register(module);
-				return;
-			}, (e) => {
-				if (e) {
-					logger.error(e);
-				}
-				logger.info(`[ModuleCollection] Registered ${this.size} modules.`);
-			});
-		});
+		logger.info(`Registered ${this.size} modules.`);
 	}
 
 	/**
 	 * Register module
-	 * @param {Function} Module the module class
+	 * @param {Function} Module class
 	 */
 	register(Module) {
-		if (Object.getPrototypeOf(Module).name !== 'Module') {
-			return logger.debug(`[ModuleCollection] Skipping unknown module`);
+		if (typeof Module !== 'function') {
+			return logger.debug('Skipping unknown module');
 		}
 
-		let module = new Module(this.rnet),
+		let module = new Module(this._config, this.rnet),
 			activeModule = this.get(module.name),
 			globalConfig = this.rnet.globalConfig;
 
 		if (activeModule) {
-			logger.debug(`[ModuleCollection] Unloading module ${module.name}`);
 			activeModule._unload();
 			this.delete(module.name);
-		}
-
-		logger.debug(`[ModuleCollection] Registering module ${module.name}`);
-
-		if (module.commands) {
-			const commands = Array.isArray(module.commands) ? module.commands : Object.values(module.commands);
-			each(commands, command => this.rnet.commands.register(command));
-		}
-
-		if (module.moduleModels) {
-			this.registerModels(module.moduleModels);
 		}
 
 		// ensure the module defines all required properties/methods
@@ -123,14 +78,12 @@ class ModuleCollection extends Collection {
 			if (module.settings) {
 				moduleCopy.settings = jsonSchema.schema2json(module.settings);
 
-				models.Server.schema.add({
+				Server.schema.add({
 					[module.name.toLowerCase()]: module.settings,
 				});
 			}
 
-			moduleCopy._state = this._config.state;
-
-			models.Module.findOneAndUpdate({ name: module.name, _state: this._config.state }, moduleCopy, { upsert: true, overwrite: true })
+			models.Module.update({ name: module.name, _state: this._config.state }, moduleCopy, { upsert: true })
 				.catch(err => logger.error(err));
 		}
 
@@ -143,34 +96,12 @@ class ModuleCollection extends Collection {
 		if (globalConfig && globalConfig.modules.hasOwnProperty(module.name) &&
 			globalConfig.modules[module.name] === false) return;
 
-		each(this.rnet.dispatcher.events, (event, next) => {
-			if (!module[event]) return next();
+		for (const event of this.rnet.dispatcher.events) {
+			if (!module[event]) continue;
 			module.registerListener(event, module[event]);
-			this._listenerCount++;
-			next();
-		}, err => {
-			if (err) logger.error(err);
-			this.get(module.name)._start(this._client);
-		});
-	}
-
-	registerModels(moduleModels) {
-		if(!moduleModels || !moduleModels.length || moduleModels.length === 0) {
-			return;
 		}
 
-		each(moduleModels, (model, next) => {
-			if(typeof model !== 'object' || !model.name || (!model.skeleton && !model.schema)) {
-				next();
-				return;
-			}
-
-			logger.debug(`[ModuleCollection] Registering model: ${model.name}`);
-
-			const schema = new this.rnet.db.Schema(model.skeleton || model.schema, model.options);
-
-			this.rnet.db.registerModel({ name: model.name, schema });
-		});
+		this.get(module.name)._start(this._client);
 	}
 
 	/**

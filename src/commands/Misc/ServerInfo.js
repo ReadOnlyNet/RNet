@@ -1,6 +1,7 @@
 'use strict';
 
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
+const utils = Loader.require('./core/utils');
 
 class ServerInfo extends Command {
 	constructor(...args) {
@@ -20,12 +21,7 @@ class ServerInfo extends Command {
 
 		const owner = this.client.users.get(guild.ownerID);
 
-		let categories = guild.channels.filter(c => c.type === 4).length;
-		let textChannels = guild.channels.filter(c => c.type === 0).length;
-		let voiceChannels = guild.channels.filter(c => c.type === 2).length;
-
 		const embed = {
-			color: (Math.random() * (1 << 24) | 0),
 			author: {
 				name: guild.name,
 				icon_url: guild.iconURL,
@@ -34,28 +30,23 @@ class ServerInfo extends Command {
 				url: `https://discordapp.com/api/guilds/${guild.id}/icons/${guild.icon}.jpg`,
 			},
 			fields: [
-				{ name: 'Owner', value: this.utils.fullName(owner), inline: true },
+				{ name: 'ID', value: guild.id, inline: true },
+				{ name: 'Name', value: guild.name, inline: true },
+				{ name: 'Owner', value: utils.fullName(owner), inline: true },
 				{ name: 'Region', value: guild.region, inline: true },
-				{ name: 'Channel Categories', value: categories ? categories.toString() : '0', inline: true },
-				{ name: 'Text Channels', value: textChannels ? textChannels.toString() : '0', inline: true },
-				{ name: 'Voice Channels', value: voiceChannels ? voiceChannels.toString() : '0', inline: true },
+				{ name: 'Channels', value: guild.channels.size.toString(), inline: true },
 				{ name: 'Members', value: guild.memberCount.toString(), inline: true },
+				{ name: 'Humans', value: guild.members.filter(m => !m.bot).length.toString(), inline: true },
+				{ name: 'Bots', value: guild.members.filter(m => m.bot).length.toString(), inline: true },
+				{ name: 'Online', value: guild.members.filter(m => m.status !== 'offline').length.toString(), inline: true },
+				{ name: 'Roles', value: guild.roles.size.toString(), inline: true },
 				// { name: 'Emojis', value: guild.emojis.length.toString(), inline: true },
 			],
 			footer: {
-				text: `ID: ${guild.id} | Server Created`,
+				text: `Server Created`,
 			},
 			timestamp: new Date(guild.createdAt),
 		};
-
-		embed.fields.push({ name: 'Humans', value: guild.members.filter(m => !m.bot).length.toString(), inline: true });
-		embed.fields.push({ name: 'Bots', value: guild.members.filter(m => m.bot).length.toString(), inline: true });
-
-		if (this.config.isPremium) {
-			embed.fields.push({ name: 'Online', value: guild.members.filter(m => m.status !== 'offline').length.toString(), inline: true });
-		}
-
-		embed.fields.push({ name: 'Roles', value: guild.roles.size.toString(), inline: true });
 
 		if (guild.roles.size < 25) {
 			embed.fields.push({ name: 'Role List', value: guild.roles.map(r => r.name).join(', '), inline: false });

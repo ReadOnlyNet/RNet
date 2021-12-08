@@ -1,13 +1,14 @@
 'use strict';
 
 const moment = require('moment');
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
+const utils = Loader.require('./core/utils');
 
 class Whois extends Command {
 	constructor(...args) {
 		super(...args);
 
-		this.aliases      = ['whois', 'userinfo'];
+		this.aliases      = ['whois', 'who', 'userinfo'];
 		this.group        = 'Misc';
 		this.description  = 'Get user information.';
 		this.usage        = 'whois [user mention]';
@@ -35,20 +36,11 @@ class Whois extends Command {
 			mentionEveryone: 'Mention Everyone',
 		};
 
-		const contrib = this.rnet.globalConfig.contributors.find(c => c.id === member.id);
-		const extra = [];
-		let team = [];
-
 		const roles = member.roles && member.roles.length ?
-			this.utils.sortRoles(member.roles.map(r => {
+			utils.sortRoles(member.roles.map(r => {
 				r = message.channel.guild.roles.get(r);
-
-				if (!r || !r.id) {
-					return 'Invalid role.';
-				}
-
-				return `<@&${r.id}>`;
-			})).join('  ') : 'None';
+				return r.name;
+			})).join(', ') : 'None';
 
 		const joinPos = [...message.guild.members.values()]
 			.sort((a, b) => (a.joinedAt < b.joinedAt) ? -1 : ((a.joinedAt > b.joinedAt) ? 1 : 0))
@@ -57,23 +49,22 @@ class Whois extends Command {
 
 		const embed = {
 			author: {
-				name: this.utils.fullName(member),
+				name: utils.fullName(member),
 				icon_url: member.user.avatarURL,
 			},
 			thumbnail: {
-				url: (contrib && contrib.badge) ?
-					`https://cdn.rnet.cf/badges/${contrib.badge}` :
-					member.user.avatarURL,
+				url: member.user.avatarURL,
 			},
-			description: `\n<@!${member.id}>`,
 			fields: [
-				// { name: 'Status', value: member.status, inline: true },
+				{ name: 'ID', value: member.id, inline: true },
+				{ name: 'Nickname', value: member.nick || 'None', inline: true },
+				{ name: 'Status', value: member.status, inline: true },
+				{ name: 'Game', value: member.game ? member.game.name : 'None', inline: true },
 				{ name: 'Joined', value: moment.unix(member.joinedAt / 1000).format('llll'), inline: true },
 				{ name: 'Join Position', value: joinPos || 'None', inline: true },
 				{ name: 'Registered', value: moment.unix(member.user.createdAt / 1000).format('llll'), inline: true },
-				{ name: `Roles [${member.roles.length}]`, value: roles.length > 1024 ? `Too many roles to show.` : roles, inline: false },
+				{ name: 'Roles', value: roles, inline: false },
 			],
-			footer: { text: `ID: ${member.id}` },
 			timestamp: new Date(),
 		};
 
@@ -92,33 +83,20 @@ class Whois extends Command {
 			}
 		}
 
-		if (member.id === this.client.user.id) {
-			team.push('A Real RNet');
-		}
-		// if (this.isAdmin(member)) extra.push(`RNet Creator`);
+		const extra = [];
 
-		if (contrib) {
-			team = team.concat(contrib.titles);
-		}
+		const contrib = this.config.contributors.find(c => c.id === member.id && c.title);
 
-		if (this.isServerAdmin(member, message.channel)) {
-			if (member.id === message.channel.guild.ownerID) {
-				extra.push(`Server Owner`);
-			} else if (member.permission.has('administrator')) {
-				extra.push(`Server Admin`);
-			} else {
-				extra.push(`Server Manager`);
-			}
-		} else if (this.isServerMod(member, message.channel)) {
-			extra.push(`Server Moderator`);
-		}
+		if (member.id === this.client.user.id) extra.push('The one and only...');
+		if (this.isAdmin(member)) extra.push(`RNet Creator`);
+
+		if (contrib) extra.push(contrib.title);
+
+		if (this.isServerAdmin(member, message.channel)) extra.push(`Server Admin`);
+		else if (this.isServerMod(member, message.channel)) extra.push(`Server Moderator`);
 
 		if (extra.length) {
 			embed.fields.push({ name: 'Acknowledgements', value: extra.join(', '), inline: false });
-		}
-
-		if (team.length) {
-			embed.fields.push({ name: 'RNet Team', value: `${team.join(', ')}`, inline: false });
 		}
 
 		return this.sendMessage(message.channel, { embed }).catch(err => this.logger.error(err));

@@ -1,8 +1,8 @@
 'use strict';
 
-const { utils } = require('@rnet.cf/rnet-core');
 const each = require('async-each');
 const logger = require('../logger');
+const utils = require('../utils');
 
 class EventManager {
 	constructor(rnet) {
@@ -13,33 +13,12 @@ class EventManager {
 		this._handlers = new Map();
 		this._listeners = {};
 		this._boundListeners = new Map();
-		this.chunkedGuilds = new Map();
-		this.disabledGuilds = new Map();
 
 		this.events = [
-			'channelCreate',
-			'channelDelete',
-			'guildBanAdd',
-			'guildBanRemove',
-			'guildCreate',
-			'guildDelete',
-			'guildMemberAdd',
-			'guildMemberRemove',
-			'guildMemberUpdate',
-			'guildRoleCreate',
-			'guildRoleDelete',
-			'guildRoleUpdate',
-			'messageCreate',
-			'messageDelete',
-			'messageDeleteBulk',
-			'messageUpdate',
-			'userUpdate',
-			'voiceChannelJoin',
-			'voiceChannelLeave',
-			'voiceChannelSwitch',
-			'messageReactionAdd',
-			'messageReactionRemove',
-			'messageReactionRemoveAll',
+			'channelCreate', 'channelDelete', 'guildMemberAdd', 'guildBanAdd', 'guildBanRemove',
+			'guildMemberRemove', 'guildMemberUpdate', 'guildCreate', 'guildDelete', 'guildRoleCreate', 'guildRoleDelete',
+			'guildRoleUpdate', 'messageCreate', 'messageDelete', 'messageDeleteBulk', 'messageUpdate', 'userUpdate',
+			'voiceChannelJoin', 'voiceChannelLeave', 'voiceChannelSwitch', 'messageReactionAdd',
 		];
 
 		this.registerHandlers();
@@ -58,17 +37,13 @@ class EventManager {
 	 */
 	registerHandlers() {
 		utils.readdirRecursive(this._config.paths.events).then(files => {
-			each(files, (file, next) => {
-				if (file.endsWith('.map')) return next();
+			for (let file of files) {
 				const handler = require(file);
 				if (!handler || !handler.name) return logger.error('Invalid handler.');
 				this._handlers.set(handler.name, handler);
-				logger.debug(`[EventManager] Registering ${handler.name} handler`);
-				return next();
-			}, err => {
-				if (err) logger.error(err);
-				logger.info(`[EventManager] Registered ${this.events.size} events.`);
-			});
+			}
+
+			logger.info(`Registered ${this.events.size} events.`);
 		}).catch(err => logger.error(err));
 	}
 
@@ -77,15 +52,12 @@ class EventManager {
 	 * to the bound listener so they can be unregistered.
 	 */
 	bindListeners() {
-		let listenerCount = 0;
 		for (let event in this._listeners) {
 			// Bind the listener so it can be removed
 			this._boundListeners[event] = this.createListener.bind(this, event);
 			// Register the listener
 			this.client.on(event, this._boundListeners[event]);
-			listenerCount++;
 		}
-		logger.info(`[EventManager] Bound ${listenerCount} listeners.`);
 	}
 
 	/**
@@ -96,7 +68,7 @@ class EventManager {
 	 */
 	registerListener(event, listener, module) {
 		// Register but don't bind listeners before the client is ready
-		if (!this._listeners[event] || !this._listeners[event].find(l => l.listener === listener)) {
+		if (!this.rnet.isReady) {
 			this._listeners[event] = this._listeners[event] || [];
 			this._listeners[event].push({ module: module || null, listener: listener });
 			return;
@@ -127,15 +99,6 @@ class EventManager {
 		if (index > -1) this._listeners[event].splice(index, 1);
 	}
 
-	awaitChunkState(guild, cb) {
-		if (guild.members && guild.members.size >= (guild.memberCount * 0.9)) {
-			this.chunkedGuilds.set(guild.id, 2);
-			return cb();
-		} else {
-			setTimeout(() => this.awaitChunkState(guild, cb), 100);
-		}
-	}
-
 	/**
 	 * Create an event listener
 	 * @param {String} event Event name
@@ -148,39 +111,15 @@ class EventManager {
 
 		// Check if a root handler exists before calling module listeners
 		if (handler) {
-			return handler(this, ...args).then(async (e) => {
+			return handler(this, ...args).then(e => {
 				if (!e || !e.guildConfig) {
 					return;
 					// return logger.warn(`${event} no event or guild config`);
 				}
 
-				if (e.guild.id && this.disabledGuilds.has(e.guild.id)) {
-					return;
-				}
-
 				// Check if guild is enabled for the app state
 				if (e.guild.id !== this._config.rnetGuild && event !== 'messageCreate') {
 					if (!this.guildEnabled(e.guildConfig, e.guild.id)) return;
-				}
-
-				let chunkState = this.chunkedGuilds.get(e.guild.id);
-
-				if (this.config.lazyChunking) {
-					if (!chunkState) {
-						chunkState = 1;
-						this.chunkedGuilds.set(e.guild.id, 1);
-						e.guild.fetchAllMembers();
-					}
-					if (chunkState === 2) {
-						if (e.guild.members.size < (e.guild.memberCount * 0.9)) {
-							chunkState = 1;
-							this.chunkedGuilds.set(e.guild.id, 1);
-							e.guild.fetchAllMembers();
-						}
-					}
-					if (chunkState !== 2) {
-						await new Promise(resolve => this.awaitChunkState(e.guild, resolve));
-					}
 				}
 
 				each(this._listeners[event], o => {
@@ -209,10 +148,6 @@ class EventManager {
 		// handle events based on region, ignore in dev
 		if (!guild) return false;
 		if (this._config.handleRegion && !utils.regionEnabled(guild, this._config)) return false;
-
-		if (this.disabledGuilds.has(guildId)) {
-			return false;
-		}
 
 		if (this._config.test) {
 			if (this._config.testGuilds.includes(guildId) || guildConfig.test) return true;

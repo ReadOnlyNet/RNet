@@ -3,8 +3,12 @@
 
 const os = require('os');
 const util = require('util');
-const moment = require('moment-timezone');
-const {Command} = require('@rnet.cf/rnet-core');
+const moment = require('moment');
+const Command = Loader.require('./core/structures/Command');
+const utils = Loader.require('./core/utils');
+const models = require('../../core/models');
+const redis = require('../../core/redis');
+const logger = require('../../core/logger');
 
 class Eval extends Command {
 
@@ -21,26 +25,12 @@ class Eval extends Command {
 		this.expectedArgs = 1;
 	}
 
-	permissionsFn({ message }) {
-		if (!message.author) return false;
-		if (!this.rnet.globalConfig || !this.rnet.globalConfig.developers) return false;
-
-		if (this.rnet.globalConfig.developers.includes(message.author.id)) {
-			return true;
-		}
-
-		return false;
-	}
-
 	async execute({ message, args, guildConfig }) {
 		let msgArray = [],
 			msg = message,
 			rnet = this.rnet,
 			client = this.client,
 			config = this.config,
-			models = this.models,
-			redis = this.redis,
-			utils = this.utils,
 			result;
 
 		try {
@@ -49,7 +39,7 @@ class Eval extends Command {
 			result = e;
 		}
 
-		if (result && result.then) {
+		if (result.then) {
 			try {
 				result = await result;
 			} catch (err) {
@@ -57,14 +47,10 @@ class Eval extends Command {
 			}
 		}
 
-		if (!result) {
-			return Promise.resolve();
-		}
-
-		msgArray = msgArray.concat(this.utils.splitMessage(result, 1990));
+		msgArray = msgArray.concat(utils.splitMessage(result, 1990));
 
 		for (let m of msgArray) {
-			this.sendCode(message.channel, m.toString().replace(this.config.client.token, 'potato'), 'js');
+			this.sendCode(message.channel, m.toString().replace(process.env.CLIENT_TOKEN, 'potato'), 'js');
 		}
 
 		return Promise.resolve();

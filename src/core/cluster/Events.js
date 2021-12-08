@@ -63,7 +63,7 @@ class Events {
 
 		if (this[message.op]) {
 			this[message.op](message);
-		} else if (message.op !== 'ready') {
+		} else {
 			this.awaitResponse(worker, message);
 		}
 	}
@@ -77,6 +77,8 @@ class Events {
 	awaitResponse(worker, message) {
 		const promises = [];
 
+		console.log(message);
+
 		for (const cluster of this.clusters.values()) {
 			if (!cluster.worker || !cluster.worker.isConnected()) continue;
 			promises.push(cluster.awaitResponse(message));
@@ -84,21 +86,13 @@ class Events {
 
 		return new Promise((resolve, reject) => {
 			Promise.all(promises).then(results => {
-				if (worker != null && worker.send) {
-					try {
-						worker.send({ op: 'resp', d: results });
-					} catch (err) {
-						logger.error(err);
-					}
+				if (worker !== null && worker.send) {
+					worker.send({ op: 'resp', d: results });
 				}
 				return resolve(results);
 			}).catch(err => {
-				if (worker != null && worker.send) {
-					try {
-						worker.send({ op: 'error', d: err });
-					} catch (err) {
-						logger.error(err);
-					}
+				if (worker !== null && worker.send) {
+					worker.send({ op: 'error', d: err });
 				}
 				return reject(err);
 			});
@@ -154,10 +148,10 @@ class Events {
 			const cluster = this.clusters.get(parseInt(message.d));
 			if (!cluster) return;
 
-			return cluster.restartWorker(true);
+			return cluster.restartWorker();
 		} else {
 			for (const cluster of this.clusters.values()) {
-				cluster.restartWorker(true);
+				cluster.restartWorker();
 				await this.manager.awaitReady(cluster);
 			}
 		}

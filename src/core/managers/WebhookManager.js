@@ -1,6 +1,6 @@
 'use strict';
 
-const axios = require('axios');
+const superagent = require('superagent');
 
 /**
  * @class WebhookManager
@@ -16,7 +16,7 @@ class WebhookManager {
 		this.config = rnet.config;
 		this.client = rnet.client;
 
-		this.avatarUrl = `${this.config.avatar}?r=${this.config.version}`;
+		this.avatarUrl = `${this.config.site.host}/${this.config.avatar}?r=${this.config.version}`;
 
 		this.default = {
 			username: 'RNet',
@@ -37,22 +37,22 @@ class WebhookManager {
 		try {
 			const webhooks = await this.client.getChannelWebhooks(channel.id);
 
-			let webhook = webhooks.find(hook => hook.name === 'RNet');
+			if (!webhooks || !webhooks.length) {
+				const res = await superagent.get(this.avatarUrl).buffer(true);
+				const webhook = await this.client.createChannelWebhook(channel.id, {
+					name: 'RNet',
+					avatar: res.body,
+				});
+
+				return Promise.resolve(webhook);
+			}
+
+			const webhook = webhooks.find(hook => hook.name === 'RNet');
 			if (webhook) {
 				return Promise.resolve(webhook);
 			}
 
-			const res = await axios.get(this.avatarUrl, {
-				headers: { Accept: 'image/*' },
-				responseType: 'arraybuffer',
-			}).then(response => `data:${response.headers['content-type']};base64,${response.data.toString('base64')}`);
-
-			webhook = await this.client.createChannelWebhook(channel.id, {
-				name: 'RNet',
-				avatar: res,
-			});
-
-			return Promise.resolve(webhook);
+			return Promise.resolve(webhooks[0]);
 		} catch (err) {
 			return Promise.reject(err);
 		}

@@ -1,6 +1,6 @@
 'use strict';
 
-const { utils } = require('@rnet.cf/rnet-core');
+const utils = require('../core/utils');
 
 module.exports = function voiceChannelSwitch(dispatcher, member, channel, oldChannel) {
 	if (!dispatcher.rnet.isReady || !member || !channel.guild) return Promise.reject();

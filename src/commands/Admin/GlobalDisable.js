@@ -1,6 +1,7 @@
 'use strict';
 
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
+const { RNet } = require('../../core/models');
 
 class GlobalDisable extends Command {
 	constructor(...args) {
@@ -21,14 +22,14 @@ class GlobalDisable extends Command {
 		const globalConfig = this.rnet.globalConfig || {};
 		const options = { new: true, upsert: true };
 
-		if (!module && !command) {
+		if (!module || !command) {
 			return this.sendMessage(message.channel, `Couldn't find module or command ${name}`);
 		}
 
 		if (module) {
 			globalConfig.modules = globalConfig.modules || {};
 			globalConfig.modules[name] = false;
-			return this.models.RNet.findOneAndUpdate({}, globalConfig, options).then(doc => {
+			return RNet.findOneAndUpdate({}, globalConfig, options).then(doc => {
 				this.config.global = doc.toObject();
 				this.success(message.channel, `Disabled module ${name}`);
 			}).catch(err => this.logger.error(err));
@@ -37,7 +38,7 @@ class GlobalDisable extends Command {
 		if (command) {
 			globalConfig.commands = globalConfig.commands || {};
 			globalConfig.commands[name] = false;
-			return this.models.RNet.findOneAndUpdate({}, globalConfig, options).then(doc => {
+			return RNet.findOneAndUpdate({}, globalConfig, options).then(doc => {
 				this.config.global = doc.toObject();
 				this.success(message.channel, `Disabled command ${name}`);
 			}).catch(err => this.logger.error(err));

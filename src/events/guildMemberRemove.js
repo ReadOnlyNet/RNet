@@ -1,6 +1,6 @@
 'use strict';
 
-const { utils } = require('@rnet.cf/rnet-core');
+const utils = require('../core/utils');
 
 module.exports = function guildMemberRemove(dispatcher, guild, member) {
 	if (!dispatcher.rnet.isReady || !guild || !member) return Promise.reject();

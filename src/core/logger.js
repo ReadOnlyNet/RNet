@@ -1,9 +1,11 @@
 'use strict';
 
 const util = require('util');
+const getenv = require('getenv');
 const moment = require('moment');
 const winston = require('winston');
-const config = require('./config');
+// const Sentry = require('winston-sentry');
+const config = requireReload(require)('./config');
 const Sentry = require('./transports/winston-sentry');
 
 /**
@@ -18,23 +20,20 @@ class Logger {
 		this.transports = [
 			new (winston.transports.Console)({
 				colorize: true,
-				level: config.logLevel || 'info',
+				level: config.logLevel || getenv('BOT_LOGLEVEL', 'info'),
 				debugStdout: true,
 				// handleExceptions: true,
 				// humanReadableUnhandledException: true,
 				timestamp: () => new Date(),
 				formatter: this._formatter.bind(this),
 			}),
-		];
-
-		if (config.sentry.dsn) {
-			this.transports.push(new Sentry({
+			new Sentry({
 				// patchGlobal: true,
-				level: config.sentry.logLevel || 'error',
+				level: config.sentry.logLevel,
 				dsn:   config.sentry.dsn,
 				logger: config.stateName,
-			}));
-		}
+			}),
+		];
 
 		this.exitOnError = false;
 
@@ -51,8 +50,8 @@ class Logger {
 		let ts = util.format('[%s]', moment(options.timestamp()).format('HH:mm:ss')),
 			level = winston.config.colorize(options.level);
 
-		if (process.env.hasOwnProperty('clusterId')) {
-			ts = `[C${process.env.clusterId}] ${ts}`;
+		if (config.hasOwnProperty('clusterId')) {
+			ts = `[Cluster ${config.clusterId}] ${ts}`;
 		}
 
 		if (!options.message.length && options.meta instanceof Error) {

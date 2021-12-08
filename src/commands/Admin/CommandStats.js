@@ -2,7 +2,9 @@
 'use strict';
 
 const util = require('util');
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
+const utils = Loader.require('./core/utils');
+const { CommandLog } = require('../../core/models');
 
 class CommandStats extends Command {
 
@@ -20,7 +22,7 @@ class CommandStats extends Command {
 	}
 
 	async execute({ message, args }) {
-		let results = await this.models.CommandLog.aggregate([
+		let results = await CommandLog.aggregate([
 			{ $group : { _id: '$command', count: { $sum: 1 } } },
 		]).exec();
 
@@ -52,7 +54,7 @@ class CommandStats extends Command {
 
 		this.sendMessage(message.channel, { embed });
 
-		// const msgArray = this.utils.splitMessage(results, 1990);
+		// const msgArray = utils.splitMessage(results, 1990);
 
 		// for (let m of msgArray) {
 		// 	this.sendCode(message.channel, m, 'js');

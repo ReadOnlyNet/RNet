@@ -1,6 +1,7 @@
 'use strict';
 
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
+const { RNet } = require('../../core/models');
 
 class GlobalEnable extends Command {
 	constructor(...args) {
@@ -28,7 +29,7 @@ class GlobalEnable extends Command {
 		if (module) {
 			globalConfig.modules = globalConfig.modules || {};
 			globalConfig.modules[name] = true;
-			return this.models.RNet.findOneAndUpdate({}, globalConfig, options).then(doc => {
+			return RNet.findOneAndUpdate({}, globalConfig, options).then(doc => {
 				this.config.global = doc.toObject();
 				this.success(message.channel, `Enabled module ${name}`);
 			}).catch(err => this.logger.error(err));
@@ -37,7 +38,7 @@ class GlobalEnable extends Command {
 		if (command) {
 			globalConfig.commands = globalConfig.commands || {};
 			globalConfig.commands[name] = true;
-			return this.models.RNet.findOneAndUpdate({}, globalConfig, options).then(doc => {
+			return RNet.findOneAndUpdate({}, globalConfig, options).then(doc => {
 				this.config.global = doc.toObject();
 				this.success(message.channel, `Enabled command ${name}`);
 			}).catch(err => this.logger.error(err));

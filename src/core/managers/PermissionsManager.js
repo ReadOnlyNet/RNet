@@ -1,6 +1,6 @@
 'use strict';
 
-const { utils } = require('@rnet.cf/rnet-core');
+const utils = require('../utils');
 
 class PermissionsManager {
 	constructor(rnet) {
@@ -15,15 +15,12 @@ class PermissionsManager {
 	 */
 	isAdmin(user) {
 		if (!user || !user.id) return false;
-		if (this.rnet.globalConfig.developers && this.rnet.globalConfig.developers.includes(user.id)) {
-			return true;
-		}
 		return (user.id === this._config.client.admin);
 	}
 
 	isOverseer(user) {
 		if (!user || !user.id) return false;
-		return (this.rnet.globalConfig.overseers && this.rnet.globalConfig.overseers.includes(user.id));
+		return (this._config.overseers && this._config.overseers.includes(user.id));
 	}
 
 	/**
@@ -80,11 +77,13 @@ class PermissionsManager {
 
 		let canOverride = null;
 
-		if (channelPerms && channelPerms[channel.id] && channelPerms[channel.id].commands.hasOwnProperty(command)) {
-			canOverride = channelPerms[channel.id].commands[command];
+		if (channelPerms && channelPerms.length) {
+			if (channelPerms[channel.id] && channelPerms[channel.id].commands.hasOwnProperty(command)) {
+				canOverride = channelPerms[channel.id].commands[command];
+			}
 		}
 
-		if (!rolePerms) return canOverride;
+		if (!rolePerms.length) return canOverride;
 
 		const roles = utils.sortRoles(channel.guild.roles);
 

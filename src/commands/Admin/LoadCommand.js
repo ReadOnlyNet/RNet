@@ -2,7 +2,8 @@
 
 const path = require('path');
 const util = require('util');
-const {Command} = require('@rnet.cf/rnet-core');
+const utils = Loader.require('./core/utils');
+const Command = Loader.require('./core/structures/Command');
 
 class LoadCommand extends Command {
 	constructor(...args) {
@@ -31,9 +32,7 @@ class LoadCommand extends Command {
 				.catch(err => this.sendCode(message.channel, err, 'js'));
 		}
 
-		let path = args.length > 1 ? `../modules/${args[0]}/commands/${args[1]}` : args[0];
-
-		return this.loadCommand(message, path)
+		return this.loadCommand(message, args[0])
 			.then(data => this.sendCode(message.channel, data.map(d => util.inspect(d)), 'js'))
 			.catch(err => this.sendCode(message.channel, err, 'js'));
 	}
@@ -42,7 +41,7 @@ class LoadCommand extends Command {
 		let filePath = path.join(this.config.paths.commands, cmd);
 		filePath = filePath.endsWith('.js') ? filePath : filePath + '.js';
 
-		if (!this.utils.existsSync(filePath)) {
+		if (!utils.existsSync(filePath)) {
 			return this.error(message.channel, `File does not exist: ${filePath}`);
 		}
 

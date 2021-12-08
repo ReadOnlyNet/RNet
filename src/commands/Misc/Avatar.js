@@ -1,6 +1,7 @@
 'use strict';
 
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
+const utils = Loader.require('./core/utils');
 
 class Avatar extends Command {
     constructor(...args) {
@@ -23,16 +24,13 @@ class Avatar extends Command {
 
         user = user.user || user;
 
-        let avatar = user.dynamicAvatarURL(null, 256);
-        avatar = avatar.match(/.gif/) ? `${avatar}&f=.gif` : avatar;
-
         return this.sendMessage(message.channel, { embed: {
             author: {
-                name: this.utils.fullName(user),
-                icon_url: user.dynamicAvatarURL(null, 32).replace(/\?size=.*/, ''),
+                name: utils.fullName(user),
+                icon_url: user.dynamicAvatarURL(null, 32),
             },
             title: 'Avatar',
-            image: { url: avatar, width: 256, height: 256 },
+            image: { url: user.dynamicAvatarURL(null, 128), width: 128, height: 128 },
         } });
     }
 }

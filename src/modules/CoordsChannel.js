@@ -1,6 +1,7 @@
 'use strict';
 
-const { Module } = require('@rnet.cf/rnet-core');
+const Module = Loader.require('./core/structures/Module');
+const utils = Loader.require('./core/utils');
 
 /**
  * CoordsChannel Module
@@ -8,8 +9,8 @@ const { Module } = require('@rnet.cf/rnet-core');
  * @extends Module
  */
 class CoordsChannel extends Module {
-	constructor(...args) {
-		super(...args);
+	constructor() {
+		super();
 
 		this.module = 'CoordsChannel';
 		this.friendlyName = 'Coords Channel Mod';
@@ -49,7 +50,7 @@ class CoordsChannel extends Module {
 
 		if (!logChannel) return;
 
-		let text = `Deleted message from ${this.utils.fullName(message.author)} in ${message.channel.mention} for ${reason}`;
+		let text = `Deleted message from ${utils.fullName(message.author)} in ${message.channel.mention} for ${reason}`;
 		if (msgContent.length) text += '\n```' + msgContent + '```';
 
 		this.sendMessage(logChannel, text);

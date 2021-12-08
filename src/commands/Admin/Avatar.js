@@ -1,7 +1,7 @@
 'use strict';
 
-const axios = require('axios');
-const {Command} = require('@rnet.cf/rnet-core');
+const superagent = require('superagent');
+const Command = Loader.require('./core/structures/Command');
 
 class SetAvatar extends Command {
 	constructor(...args) {
@@ -18,17 +18,14 @@ class SetAvatar extends Command {
 
 	async execute({ message, args }) {
 		try {
-			var res = await axios.get(args[0], {
-				header: { Accept: 'image/*' },
-				responseType: 'arraybuffer',
-			}).then(response => `data:${response.headers['content-type']};base64,${response.data.toString('base64')}`);
+			var res = await superagent.get(args[0]);
 		} catch (err) {
 			return this.error(message.channel, 'Failed to get a valid image.');
 		}
 
-		console.log(res);
+		const image = `data:image/jpeg;base64,${res.body.toString('base64')}`;
 
-		return this.client.editSelf({ avatar: res })
+		return this.client.editSelf({ avatar: image })
 			.then(() => this.success(message.channel, 'Changed avatar.'))
 			.catch(() => this.error(message.channel, 'Failed setting avatar.'));
 	}

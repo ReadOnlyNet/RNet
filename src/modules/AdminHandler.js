@@ -1,6 +1,6 @@
 'use strict';
 
-const { Module } = require('@rnet.cf/rnet-core');
+const Module = Loader.require('./core/structures/Module');
 
 /**
  * Carbon Module
@@ -8,8 +8,8 @@ const { Module } = require('@rnet.cf/rnet-core');
  * @extends Module
  */
 class AdminHandler extends Module {
-	constructor(...args) {
-		super(...args);
+	constructor() {
+		super();
 
 		this.module = 'AdminHandler';
 		this.enabled = true;
@@ -31,7 +31,7 @@ class AdminHandler extends Module {
 	}
 
 	preMessage(message) {
-		if (!message.channel.guild || !message.author || message.author.bot) return;
+		if (!message.author || message.author.bot) return;
 
 		const isAdmin = this.isAdmin(message.author);
 		const isOverseer = this.isOverseer(message.author);

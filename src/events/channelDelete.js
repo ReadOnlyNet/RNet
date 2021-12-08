@@ -1,6 +1,6 @@
 'use strict';
 
-const { utils } = require('@rnet.cf/rnet-core');
+const utils = require('../core/utils');
 
 module.exports = function channelDelete(dispatcher, channel) {
 	if (!dispatcher.rnet.isReady || !channel.guild) return Promise.reject();

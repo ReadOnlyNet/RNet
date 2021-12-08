@@ -1,6 +1,7 @@
 'use strict';
 
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
+const utils = Loader.require('./core/utils');
 
 class Discrim extends Command {
 	constructor(...args) {
@@ -10,14 +11,15 @@ class Discrim extends Command {
 		this.group = 'Misc';
 		this.description = 'Gets a list of users with a discriminator';
 		this.usage = 'discrim 1234';
-		this.cooldown = 6000;
+		this.hideFromHelp = true;
+		this.cooldown = 10000;
 		this.expectedArgs = 0;
 	}
 
 	execute({ message, args }) {
 		const discrim = args.length ? args[0] : message.author.discriminator;
 		let users = this.client.users.filter(u => u.discriminator === discrim)
-			.map(u => this.utils.fullName(u));
+			.map(u => utils.fullName(u));
 
 		if (!users || !users.length) {
 			return this.error(`I couldn't find any results for ${discrim}`);

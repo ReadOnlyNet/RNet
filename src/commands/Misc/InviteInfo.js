@@ -1,6 +1,8 @@
 'use strict';
 
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
+const utils = Loader.require('./core/utils');
+const { Server } = require('../../core/models');
 
 class InviteInfo extends Command {
 	constructor(...args) {
@@ -37,7 +39,7 @@ class InviteInfo extends Command {
 		}
 
 		const embed = {
-			color: this.utils.getColor('blue'),
+			color: utils.getColor('blue'),
 			author: {
 				name: invite.guild.name,
 				icon_url: `https://cdn.discordapp.com/icons/${invite.guild.id}/${invite.guild.icon}.jpg?size=128`,
@@ -47,7 +49,7 @@ class InviteInfo extends Command {
 		};
 
 		if (invite.inviter) {
-			embed.fields.push({ name: 'Inviter', value: this.utils.fullName(invite.inviter), inline: true });
+			embed.fields.push({ name: 'Inviter', value: utils.fullName(invite.inviter), inline: true });
 		}
 
 		if (invite.channel) {
@@ -64,7 +66,7 @@ class InviteInfo extends Command {
 
 		if (message.guild.id === this.config.rnetGuild) {
 			try {
-				var inviteGuild = await this.models.Server.findOne({ _id: invite.guild.id }, { deleted: 1, ownerID: 1 }).lean().exec();
+				var inviteGuild = await Server.findOne({ _id: invite.guild.id }, { deleted: 1, ownerID: 1 }).lean().exec();
 			} catch (err) {
 				// pass
 			}
@@ -79,7 +81,7 @@ class InviteInfo extends Command {
 					}
 
 					if (owner) {
-						embed.fields.push({ name: 'Owner', value: this.utils.fullName(owner), inline: true });
+						embed.fields.push({ name: 'Owner', value: utils.fullName(owner), inline: true });
 					}
 				}
 			} else {

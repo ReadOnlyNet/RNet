@@ -1,6 +1,6 @@
 'use strict';
 
-const { utils } = require('@rnet.cf/rnet-core');
+const utils = require('../core/utils');
 
 module.exports = function guildRoleCreate(dispatcher, guild, role) {
 	if (!dispatcher.rnet.isReady || !guild || !role) return Promise.reject();

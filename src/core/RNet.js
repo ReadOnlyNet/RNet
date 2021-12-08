@@ -1,21 +1,19 @@
 'use strict';
 
 global.Promise = require('bluebird');
+global.Loader = require('./utils/Loader');
 
-const fs = require('fs');
-const path = require('path');
-const axios = require('axios');
-const Eris = require('@rnet.cf/eris');
-const { utils } = require('@rnet.cf/rnet-core');
-const dot = require('dot-object');
+const Eris = require('eris');
+const blocked = require('blocked');
 const each = require('async-each');
-const StatsD = require('hot-shots');
 const moment = require('moment');
-const uuid = require('uuid/v4');
 const config = require('./config');
 const logger = require('./logger');
-const redis = require('./redis');
-const db = require('./database');
+const utils = require('../core/utils');
+const redis = require('../core/redis');
+const models = require('../core/models');
+const statsd = require('../core/statsd');
+const postWebhook = require('./helpers/post-webhook');
 const PermissionsManager = require('./managers/PermissionsManager');
 const CommandCollection = require('./collections/CommandCollection');
 const ModuleCollection = require('./collections/ModuleCollection');
@@ -23,31 +21,8 @@ const GuildCollection = require('./collections/GuildCollection');
 const WebhookManager = require('./managers/WebhookManager');
 const EventManager = require('./managers/EventManager');
 const IPCManager = require('./managers/IPCManager');
-const RPCServer = require('./RPCServer');
-const RPCClient = require('./RPCClient');
-const { Client } = require('./rpc');
-const prom = require('prom-client');
-
-
-var EventEmitter;
-
-try {
-	EventEmitter = require('eventemitter3');
-} catch (e) {
-	EventEmitter = require('events');
-}
-
-const redisLock = require('ioredis-lock');
 
 var instance;
-
-const statsdClient = new StatsD({
-	host: config.statsd.host,
-	port: config.statsd.port,
-	prefix: config.statsd.prefix,
-});
-
-const premiumWebhook = 'https://discord.com/api/webhooks/918133942505324544/Ge6eWkJNKLWP2SSXlJBDtc6u6OS9GcQt_efacpt8jAdKCjGA8D4JophJnH9yt-vieTHe';
 
 /**
  * @class RNet
@@ -58,9 +33,8 @@ class RNet {
 	 * RNet constructor
 	 */
 	constructor() {
+		this._config = config;
 		this.isReady = false;
-		this.startTime = Date.now();
-		this.uuid = uuid();
 
 		instance = this; // eslint-disable-line
 
@@ -68,10 +42,9 @@ class RNet {
 			get: function get() { return this.channel.guild; },
 		});
 
-		process.on('unhandledRejection', this.handleRejection.bind(this));
-		process.on('uncaughtException', this.crashReport.bind(this));
+		this._wsStatus = Date.now();
 
-		this.activityInterval = setInterval(this.uncacheGuilds.bind(this), 900000);
+		process.on('unhandledRejection', this.handleRejection.bind(this));
 	}
 
 	static get instance() {
@@ -99,7 +72,7 @@ class RNet {
 	 * @returns {Object}
 	 */
 	get config() {
-		return config;
+		return this._config;
 	}
 
 	/**
@@ -108,38 +81,6 @@ class RNet {
 	 */
 	get globalConfig() {
 		return this._globalConfig;
-	}
-
-	get logger() {
-		return logger;
-	}
-
-	get db() {
-		return db;
-	}
-
-	get models() {
-		return db.models;
-	}
-
-	get redis() {
-		return this._redis;
-	}
-
-	get statsd() {
-		return statsdClient;
-	}
-
-	get utils() {
-		return utils;
-	}
-
-	get prefix() {
-		return (config.prefix != undefined && typeof config.prefix === 'string') ? config.prefix : '?';
-	}
-
-	get prom() {
-		return prom;
 	}
 
 	handleError(err) {
@@ -167,131 +108,15 @@ class RNet {
 		}
 	}
 
-	crashReport(err) {
-		const cid = `C${this.clientOptions.clusterId}`;
-		const time = (new Date()).toISOString();
-		let report = `Crash Report [${cid}] ${time}:\n\n${err.stack}`;
-
-		report += `\n\nClient Options: ${JSON.stringify(this.clientOptions)}`;
-
-		for (let module of this.modules.values()) {
-			if (module.crashReport) {
-				report += `\n\n${module.crashReport()}`;
-			}
-		}
-
-		const file = path.join(__dirname, `crashreport_${cid}_${time}.txt`);
-		fs.writeFileSync(file, report);
-
-		setTimeout(() => process.exit(), 6000);
-	}
-
-	range(start, end) {
-		return (new Array(end - start + 1)).fill(undefined).map((_, i) => i + start);
-	}
-
 	/**
 	 * Setup RNet and login
 	 */
-	async setup(options, rootContext) {
+	async setup(options) {
 		options = options || {};
 
-		await this.configure(options);
+		this.options = options;
 
-		options.restClient = { restMode: true };
-
-		this.options = Object.assign({}, { rootCtx: rootContext }, options);
-		this.clientOptions = options;
-
-		this.shards = this.range(options.firstShardId, options.lastShardId);
-
-		//connect to redis
-		try {
-			this._redis = await redis.connect();
-		} catch (err) {
-			logger.error(err);
-		}
-
-		const pipeline = this.redis.pipeline();
-
-		for (let shard of this.shards) {
-			pipeline.hgetall(`guild_activity:${config.client.id}:${options.shardCount}:${shard}`);
-		}
-
-		let results = await pipeline.exec();
-
-		results = results.map(r => {
-			let [err, res] = r;
-			if (err) {
-				return;
-			}
-			return res;
-		}).filter(r => r != null);
-
-		this._guildActivity = Object.assign(...results);
-
-		// create the discord client
-		const token = this.config.isPremium ? config.client.token : this.globalConfig.prodToken || config.client.token;
-
-		this._client = new Eris(token, config.clientOptions);
-		this._restClient = new Eris(`Bot ${token}`, options.restClient);
-
-		this.client.on('error', err => logger.error(err));
-		this.client.on('warn', err => logger.error(err));
-		this.client.on('debug', msg => {
-			if (typeof msg === 'string') {
-				msg = msg.replace(config.client.token, 'potato');
-			}
-			logger.debug(`[Eris] ${msg}`);
-		});
-
-		if (!options.awaitReady) {
-			this.client.once('shardReady', () => {
-				this.isReady = true;
-				this.user = this._client.user;
-				this.userid = this._client.user.id;
-			});
-		}
-
-		this.dispatcher = new EventManager(this);
-		this.ipc = new IPCManager(this);
-		this.internalEvents = new EventEmitter();
-
-		// Create collections
-		this.commands = new CommandCollection(config, this);
-		this.modules  = new ModuleCollection(config, this);
-		this.guilds   = new GuildCollection(config, this);
-
-		// Create managers
-		this.webhooks  = new WebhookManager(this);
-		this.permissions = new PermissionsManager(this);
-
-		// Create RPC Server
-		this.rpcServer = new RPCServer(this);
-		this.RPCClient = RPCClient;
-		this.cmClient = new Client(config.rpcHost || 'localhost', 5052);
-
-		// event listeners
-		this.client.once('ready', this.ready.bind(this));
-		this.client.on('error', this.handleError.bind(this));
-
-		// login to discord
-		this.login();
-
-		this.readyTimeout = setTimeout(() => {
-			try {
-				this.ipc.send('ready');
-			} catch (err) {
-				logger.error(`IPC Error Caught:`, err);
-			}
-		}, 90000);
-	}
-
-	async configure(options) {
-		await this.loadConfig().catch(() => null);
-		this.watchGlobal();
-
-		const clientConfig = {
+		options.client = {
 			disableEvents: {
 				TYPING_START: true,
 			},
@@ -301,73 +126,63 @@ class RNet {
 			lastShardID: options.lastShardId || options.clusterId || options.shardId || 0,
 			maxShards: options.shardCount || 1,
 			messageLimit: parseInt(config.client.maxCachedMessages) || 10,
-			guildCreateTimeout: 2000,
-			largeThreshold: 50,
-			defaultImageFormat: 'png',
-			preIdentify: this.preIdentify.bind(this),
-			intents: config.client.intents || undefined,
+			guildCreateTimeout: 3000,
+			// crystal: true,
 		};
 
-		if (!this.config.isPremium && !config.test) {
-			// if ((options.clusterId % 2) > 0) {
-			// 	clientConfig.compress = true;
-			// }
-
-			if (!this.globalConfig.disableGuildActivity) {
-				clientConfig.disableEvents.PRESENCE_UPDATE = true;
-				clientConfig.createGuild = this.createGuild.bind(this);
-			}
-		}
+		options.restClient = { restMode: true };
 
 		if (config.disableEvents) {
 			for (let event of config.disableEvents) {
-				clientConfig.disableEvents[event] = true;
+				options.client.disableEvents[event] = true;
 			}
 		}
 
-		config.clientOptions = clientConfig;
+		// create the discord client
+		this._client = new Eris(config.client.token, options.client);
+		this._restClient = new Eris(`Bot ${config.client.token}`, options.restClient);
 
-		await this.loadConfig().catch(() => null);
-		await this.watchGlobal();
-		
-		return clientConfig;
-	}
+		this.client.on('error', err => logger.error(err));
+		this.client.on('debug', msg => logger.debug(msg));
 
-	async watchGlobal() {
-		await this.updateGlobal();
+		await this.fetchGlobal();
+		setInterval(this.fetchGlobal.bind(this), 60000);
 
-		this._globalConfigInterval = setInterval(() => this.updateGlobal(), 2 * 60 * 1000);
-	}
+		this.dispatcher = new EventManager(this);
+		this.ipc = new IPCManager(this);
 
-	async loadConfig() {
-		try {
-			if (this.models.Config != undefined) {
-				const dbConfig = await this.models.Config.findOne({ clientId: config.client.id }).lean();
-				if (dbConfig) {
-					config = Object.assign(config, dbConfig);
-				}
-			}
-			const globalConfig = await this.models.RNet.findOne().lean();
-			this._globalConfig = config.global = globalConfig;
-		} catch (err) {
-			this.logger.error(err);
+		// Create collections
+		this.commands  = new CommandCollection(config, this);
+		this.modules   = new ModuleCollection(config, this);
+		this.guilds    = new GuildCollection(config, this);
+
+		// Create managers
+		this.webhooks  = new WebhookManager(this);
+		this.permissions = new PermissionsManager(this);
+
+		if (config.prefix) {
+			this.prefix = (typeof config.prefix === 'string') ? config.prefix : '?';
 		}
-	}
 
-	async updateGlobal() {
-		try {
-			const globalConfig = await this.models.RNet.findOne().lean();
-			if (globalConfig) {
-				this._globalConfig = config.global = globalConfig;
-			}
-		} catch (err) {
-			logger.error(err, 'globalConfigRefresh');
+		if (config.beta) {
+			this.enableBetaGuilds();
 		}
-	}
 
-	updateStatus(status) {
-		this.playingStatus = status;
-		this.client.editStatus('online', { name: this.playingStatus, type: 0 });
+		// event listeners
+		this.client.once('ready', this.ready.bind(this));
+		this.client.on('shardReady', this.shardReady.bind(this));
+		this.client.on('shardResume', this.shardResume.bind(this));
+		// this.client.on('shardIdentify', this.shardIdentify.bind(this));
+		this.client.on('shardDisconnect', this.shardDisconnect.bind(this));
+		this.client.on('error', this.handleError.bind(this));
+
+		if (!config.disableHeartbeat) {
+			this.client.on('messageCreate', this.gatewayPing.bind(this));
+			setInterval(this.gatewayCheck.bind(this), 30000);
+		}
+
+		// login to discord
+		this.login();
 	}
 
 	/**
@@ -375,154 +190,192 @@ class RNet {
 	 * @returns {*}
 	 */
 	login() {
+		if (!config.client.token || !config.client.token.length) {
+			return logger.error('OAuth Token must be set in .env');
+		}
+
 		// connect to discord
 		this.client.connect();
 
 		return false;
 	}
 
-	preIdentify(id) {
-		let bucket, key, timeout;
-
-		if (config.isPremium && !config.test) {
-			timeout = 5250;
-			key = `shard:identify:${config.client.id}`;
-		} else {
-			bucket = id % 16;
-			timeout = 7500;
-			key = `shard:identify:${config.client.id}:${bucket}`;
-		}
-
-		const lock = redisLock.createLock(this.redis, {
-			timeout: timeout,
-			retries: Number.MAX_SAFE_INTEGER,
-			delay: 50,
-		});
-
-		return new Promise((resolve, reject) => {
-			lock.acquire(key).then(() => {
-				if (id) {
-					logger.debug(`Acquired lock on ${id}`);
-				}
-
-				return resolve();
-
-				// this.client.getBotGateway().then(data => {
-				// 	const sessionLimit = data.session_start_limit;
-				// 	if (sessionLimit.remaining <= 5) {
-				// 		this.alertSessionLimit();
-				// 		return reject(`Session limit dangerously low.`);
-				// 	}
-
-				// 	return resolve();
-				// });
-			});
-		});
+	/**
+	 * Shard ready handler
+	 * @param  {Number} id Shard ID
+	 */
+	shardReady(id) {
+		logger.info(`Shard ${id} ready.`);
+		this.ipc.send(`shardReady`, id.toString());
+		this.postStat('ready');
 	}
 
-	createGuild(_guild) {
-		let lastActive = this._guildActivity[_guild.id];
-
-		if (lastActive) {
-			lastActive = parseInt(lastActive, 10);
-			_guild.lastActive = lastActive;
-			let diff = (Date.now() - lastActive);
-			let min = (60 * 60 * 24 * 1 * 1000); // 1 days
-
-			delete this._guildActivity[_guild.id];
-
-			if (diff > min) {
-				_guild.inactive = true;
-				return this.client.guilds.add(_guild, this.client, true);
-			}
-		}
-
-		let guild = this.client.guilds.add(_guild, this.client, true);
-
-		if (config.clientOptions.getAllUsers && guild.members.size < guild.memberCount) {
-			guild.fetchAllMembers();
-		}
-
-		return guild;
-	}
-
-	uncacheGuilds() {
-		const guilds = this.client.guilds.filter(g => !g.inactive);
-		for (let guild of guilds) {
-			const diff = (Date.now() - guild.lastActive);
-			const min = (60 * 60 * 24 * 1 * 1000); // 1 days
-
-			if (diff > min) {
-				let _guild = {
-					id: guild.id,
-					unavailable: guild.unavailable,
-					member_count: guild.memberCount,
-					lastActive: guild.lastActive,
-					inactive: true,
-				};
-				this.client.guilds.add(_guild, this.client, true);
-			}
-		}
-	}
-
-	alertSessionLimit() {
-		const lock = redisLock.createLock(redis, {
-			timeout: 60000,
-			retries: 0,
-			delay: 250,
-		});
-
-		lock.acquire(`alerts:session:${config.client.id}`).then(() => {
-			this.restClient.executeWebhook('482709011356057631', 'oLrn3NnEg2cL-7cM6mFrvgdTPoCMx-unh8k2YwlEIkcZnXeOy54-QKZpOMUkPZ527x7X', {
-				embeds: [{
-					color: 15607824,
-					title: `Danger`,
-					description: `**RNet is dangerously close to token reset. Some shards may be offline. Let someone know.**`,
-					timestamp: (new Date()).toISOString(),
-				}],
-			}).catch(() => null);
-		}).catch(() => null);
+	/**
+	 * Shard resume handler
+	 * @param  {Number} id Shard ID
+	 */
+	shardResume(id) {
+		logger.info(`Shard ${id} resumed.`);
+		this.ipc.send('shardResume', id.toString());
+		this.postStat('resume');
 	}
 
 	/**
 	 * Ready event handler
 	 */
 	ready() {
-		logger.info(`[RNet] ${this.config.name} ready with ${this.client.guilds.size} guilds.`);
+		logger.info(`${this.config.name} ready with ${this.client.guilds.size} guilds.`);
+		logger.info('Registering event listeners.');
 
 		// register discord event listeners
 		this.dispatcher.bindListeners();
 
-		clearTimeout(this.readyTimeout);
-		try {
-			this.ipc.send('ready');
-		} catch (err) {
-			logger.error(`IPC Error Caught:`, err);
-		}
+		this.ipc.send('ready');
 
 		this.user = this._client.user;
 		this.userid = this._client.user.id;
 
 		this.isReady = true;
 
-		if (this.globalConfig.playingStatus) {
-			this.playingStatus = this.globalConfig.playingStatus[this.config.client.id] ||
-					     this.globalConfig.playingStatus.default ||
-					     this.config.client.game;
-			this.client.editStatus('online', { name: this.playingStatus, type: 0 });
-		} else if (this.config.client.game) {
-			this.client.editStatus('online', { name: this.config.client.game, type: 0 });
+		if (this.config.client.game) {
+			this.client.editStatus('online', { name: this.config.client.game });
 		}
+
+		// if (this.config.handleRegion) {
+		// 	this.uncacheInterval = setInterval(this.uncacheGuilds.bind(this), 300000);
+		// 	this.uncacheGuilds();
+		// }
 
 		if (this.config.isPremium) {
 			this.leaveInterval = setInterval(this.leaveGuilds.bind(this), 300000);
 			this.leaveGuilds();
 		}
+
+		// if (this.config.beta && this.config.uncacheBeta) {
+		// 	this.uncacheBeta();
+		// }
+
+		blocked(ms => {
+			const id = this.options.clusterId;
+			const text = `C${id.toString()} blocked for ${ms}ms`;
+			logger.debug(text);
+			this.ipc.send('blocked', text);
+		}, { threshold: 250 });
+	}
+
+	/**
+	 * Shard disconnect handler
+	 * @param  {Error} err Error if one is passed
+	 * @param  {Number} id  Shard ID
+	 */
+	shardDisconnect(err, id) {
+		// let fields = null;
+
+		if (err) {
+			const shard = this.client.shards.get(id);
+			logger.warn(err, { type: 'rnet.cfardDisconnect', shard: id, trace: shard.discordServerTrace });
+			// fields = [{ name: 'Error', value: err.message }, { name: 'Trace', value: shard.discordServerTrace.join(', ') }];
+		}
+
+		logger.info(`Shard ${id} disconnected`);
+
+		let data = { id };
+		if (err && err.message) data.error = err.message;
+
+		this.ipc.send('shardDisconnect', data);
+		this.postStat('disconnect');
+	}
+
+	fetchGlobal() {
+		return models.RNet.findOne().lean()
+			.then(doc => { this._globalConfig = doc; })
+			.catch(err => logger.error(err));
+	}
+
+	/**
+	 * Updated the gateway status for this shard
+	 */
+	gatewayPing() {
+		this._wsStatus = Date.now();
+	}
+
+	/**
+	 * Check the status of the gateway connection and kill the process
+	 * if it hasn't received a message in 5 minutes
+	 */
+	gatewayCheck() {
+		const elapsed = (Date.now() - this._wsStatus) / 1000;
+		if (elapsed > 900) {
+			logger.error(`No message received in 15 minutes, restarting cluster ${this.options.clusterId}`);
+			process.exit(9);
+		}
+	}
+
+	postShardStatus(text, fields) {
+		if (!config.shardWebhook) return;
+		if (config.state === 2) return;
+
+		const payload = {
+            username: 'Shard Manager',
+            avatar_url: `${config.site.host}/${config.avatar}`,
+            embeds: [],
+            tts: false,
+        };
+
+        const embed = {
+			title: text,
+			timestamp: new Date(),
+			footer: {
+				text: config.stateName,
+			},
+        };
+
+        if (fields) embed.fields = fields;
+
+        payload.embeds.push(embed);
+
+        postWebhook(config.shardWebhook, payload);
+	}
+
+	async postStat(key) {
+		const day = moment().format('YYYYMMDD');
+		const hr = moment().format('YYYYMMDDHH');
+
+		statsd.increment(`discord.shard.${key}`, 1);
+
+		const [dayExists, hrExists] = await Promise.all([
+			redis.existsAsync(`shard.${key}.${day}`),
+			redis.existsAsync(`shard.${key}.${hr}`),
+		]);
+
+		const multi = redis.multi();
+
+		multi.incrby(`shard.${key}.${day}`, 1);
+		multi.incrby(`shard.${key}.${hr}`, 1);
+
+		if (!dayExists) {
+			multi.expire(`shard.${key}.${day}`, 604800);
+		}
+
+		if (!hrExists) {
+			multi.expire(`shard.${key}.${hr}`, 259200);
+		}
+
+		multi.execAsync().catch(err => logger.error(err));
+	}
+
+	uncacheGuilds() {
+		each([...this.client.guilds.values()], guild => {
+			if (guild.id === this.config.rnetGuild) return;
+			if (!utils.regionEnabled(guild)) {
+				this.client.uncacheGuild(guild.id);
+			}
+		});
 	}
 
 	async leaveGuilds() {
 		try {
-			var docs = await this.models.Server.find({ deleted: false, isPremium: true }, { _id: 1, isPremium: 1, premiumInstalled: 1 }).lean().exec();
+			var docs = await models.Server.find({ deleted: false, isPremium: true }, { _id: 1, isPremium: 1, premiumInstalled: 1 }).lean().exec();
 		} catch (err) {
 			return logger.error(err);
 		}
@@ -530,45 +383,29 @@ class RNet {
 		each([...this.client.guilds.values()], guild => {
 			let guildConfig = docs.find(d => d._id === guild.id);
 			if (!guildConfig || !guildConfig.isPremium) {
-				this.verifyAndLeave(guild.id);
-//				this.guilds.update(guild.id, { $set: { premiumInstalled: false } }).catch(err => false);
-//				this.client.leaveGuild(guild.id);
+				this.guilds.update(guild.id, { $set: { premiumInstalled: false } }).catch(err => false);
+				this.client.leaveGuild(guild.id);
 			}
 		});
 	}
 
-	async verifyAndLeave(guildId) {
-		try {
-			const doc = await this.models.Server.findOne({ _id: guildId }).lean();
-			if (!doc) {
-				this.postWebhook(premiumWebhook, { embeds: [{ title: 'Premium Verification Failed', description: `No guild config was returned: ${guildId}`, color: 16729871 }] });
-				return logger.error(`Premium verification failed: No guild config was returned. ${guildId}`);
-			}
+	async enableBetaGuilds() {
+		let docs = await models.Server.find({ deleted: false, beta: true })
+			.select('_id')
+			.lean()
+			.exec();
 
-			if (doc.isPremium) {
-				this.postWebhook(premiumWebhook, { embeds: [{ title: 'Premium Verification Failed', description: `Guild is premium but was scheduled to leave: ${guildId}`, color: 16729871 }] });
-				return logger.error(`Premium verification failed: Guild is premium, but was flagged for deletion. ${guildId}`);
-			}
+		let guilds = docs.map(d => d._id);
 
-			this.postWebhook(premiumWebhook, { embeds: [{ title: 'Premium Verification Passed', description: `Leaving Guild ${guildId}` }], color: 2347360 });
-			this.guilds.update(guildId, { $set: { premiumInstalled: false } }).catch(err => false);
-			this.client.leaveGuild(guildId);
-		} catch (err) {
-			logger.error(err);
+		if (!guilds.includes(this.config.rnetGuild)) {
+			guilds.push(this.config.rnetGuild);
 		}
-	}
 
-	postWebhook(webhook, payload) {
-		return new Promise((resolve, reject) =>
-			axios.post(webhook, {
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				...payload,
-			})
-			.then(resolve)
-			.catch(reject));
+		if (!this.client.enableGuilds) {
+			throw new Error('Enabled guilds not available in the client.');
+		}
+
+		this.client.enableGuilds(guilds);
 	}
 }
 

@@ -44,7 +44,3 @@ jsconfig.json
 pm2.json
 Apollo.js
 build
-package-lock.json
-config/local*
-src/core/crashreport*
-report.*

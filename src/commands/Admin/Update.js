@@ -1,7 +1,8 @@
 'use strict';
 
 const { exec } = require('child_process');
-const {Command} = require('@rnet.cf/rnet-core');
+const Command = Loader.require('./core/structures/Command');
+const utils = Loader.require('./core/utils');
 
 class Update extends Command {
 
@@ -40,7 +41,7 @@ class Update extends Command {
 			result = err;
 		}
 
-		msgArray = msgArray.concat(this.utils.splitMessage(result, 1990));
+		msgArray = msgArray.concat(utils.splitMessage(result, 1990));
 
 		for (let m of msgArray) {
 			this.sendCode(message.channel, m, 'js');

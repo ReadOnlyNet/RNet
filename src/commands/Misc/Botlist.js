@@ -1,7 +1,7 @@
 'use strict';
 
-const axios = require('axios');
-const {Command} = require('@rnet.cf/rnet-core');
+const superagent = require('superagent');
+const Command = Loader.require('./core/structures/Command');
 
 class Botlist extends Command {
 	constructor(...args) {
@@ -17,12 +17,13 @@ class Botlist extends Command {
 	}
 
 	async execute({ message, args }) {
+		console.log(1);
 		let page = args[0] || 1,
 			i = 0;
 
 		try {
-			const res = await axios.get(this.config.carbon.list);
-			var data = res.data;
+			const res = await superagent.get(this.config.carbon.list);
+			var data = res.body;
 		} catch (err) {
 			return this.logger.error(err);
 		}

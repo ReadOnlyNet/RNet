@@ -1,13 +1,11 @@
 'use strict';
 
-const dot = require('dot-object');
 const each = require('async-each');
-const { Collection, utils } = require('@rnet.cf/rnet-core');
-const { models } = require('../../core/database');
-const redis = require('../../core/redis');
-const logger = require('../logger');
-
-const premiumWebhook = 'https://discord.com/api/webhooks/918133942505324544/Ge6eWkJNKLWP2SSXlJBDtc6u6OS9GcQt_efacpt8jAdKCjGA8D4JophJnH9yt-vieTHe';
+const superagent = require('superagent');
+const Collection = requireReload(require)('../interfaces/Collection');
+const logger = requireReload(require)('../logger');
+const utils = requireReload(require)('../utils');
+const { Server } = require('../../core/models');
 
 /**
  * @class GuildCollection
@@ -23,42 +21,21 @@ class GuildCollection extends Collection {
 		super();
 
 		this.rnet = rnet;
-		this.client = rnet.client;
-		this.config = config;
+		this._client = rnet.client;
+		this._config = config;
 		this._registering = new Set();
 		this._activeThreshold = 3600 * 1000; // 24 hrs
 
 		rnet.dispatcher.registerListener('guildCreate', this.guildCreated.bind(this));
 		rnet.dispatcher.registerListener('guildDelete', this.guildDeleted.bind(this));
 
-		this.createWatch();
+		rnet.ipc.on('guildUpdate', this.guildUpdate.bind(this));
 
-		setInterval(this.uncacheData.bind(this), 150000);
+		setInterval(this.uncacheData.bind(this), 300000);
 	}
 
 	get globalConfig() {
 		return this.rnet.globalConfig;
-	}
-
-	async createWatch() {
-		// We need an exclusive connection for publish / subscribe
-		this.subRedis = await redis.connect();
-
-		await this.subRedis.subscribe('guildConfig');
-
-		this.subRedis.on('message', (channel, message) => {
-			if (channel === 'guildConfig') {
-				this.guildUpdate(message);
-			}
-		});
-	}
-
-	guildUpdate(id) {
-		if (!this.client.guilds.has(id) || !this.has(id)) {
-			return;
-		}
-
-		this.fetch(id).catch(err => logger.error(err));
 	}
 
 	/**
@@ -79,14 +56,11 @@ class GuildCollection extends Collection {
 	 */
 	getOrFetch(id) {
 		const doc = this.get(id);
-		if (doc) {
-			doc.cachedAt = Date.now();
-			return Promise.resolve(doc);
-		}
+		if (doc) return Promise.resolve(doc);
 
 		return this.fetch(id).then(doc => {
 			if (!doc) {
-				return this.registerGuild(this.client.guilds.get(id));
+				return this.registerGuild(this._client.guilds.get(id));
 			}
 
 			doc.cachedAt = Date.now();
@@ -104,7 +78,7 @@ class GuildCollection extends Collection {
 	fetch(id) {
 		let updateKeys = ['name', 'region', 'iconURL', 'ownerID', 'memberCount'];
 		return new Promise((resolve, reject) => {
-			models.Server.findAndPopulate(id)
+			Server.findAndPopulate(id)
 				.then(doc => {
 					if (!doc) {
 						return resolve();
@@ -113,14 +87,14 @@ class GuildCollection extends Collection {
 					doc = doc.toObject();
 					let update = false;
 
-					if (this.client.guilds.has(id)) {
-						const guild = this.client.guilds.get(id);
+					if (doc.deleted === true && this._client.guilds.has(id)) {
+						doc.deleted = false;
+						update = update || {};
+						update.deleted = false;
+					}
 
-						if (!doc.longId) {
-							update = update || {};
-							update.longId = guild.id;
-						}
-
+					if (this._config.collector && this._client.guilds.has(id)) {
+						const guild = this._client.guilds.get(id);
 						for (let key of updateKeys) {
 							if (guild[key] && doc[key] !== guild[key]) {
 								update = update || {};
@@ -129,26 +103,20 @@ class GuildCollection extends Collection {
 							}
 						}
 
-						if (doc.deleted === true) {
-							update = update || {};
-							update.deleted = false;
-						}
-
-						if (!doc.clientID || doc.clientID !== this.config.client.id) {
-							if ((this.config.isPremium && doc.isPremium) || (!this.config.isPremium && !doc.isPremium)) {
+						if (!doc.clientID || doc.clientID !== this._config.client.id) {
+							if ((this._config.isPremium && doc.isPremium) || (!this._config.isPremium && !doc.isPremium)) {
 								update = update || {};
-								update.clientID = this.config.client.id;
+								update.clientID = this._config.client.id;
 							}
 						}
 
 						if (!doc.lastActive || (Date.now() - doc.lastActive) > this._activeThreshold) {
 							update = update || {};
 							update.lastActive = Date.now();
-							this.setActive(guild, update.lastActive);
 						}
 
 						if (update) {
-							this.update(id, { $set: update }).catch(err => logger.error(err));
+							Server.update({ _id: id }, { $set: update }).catch(err => logger.error(err));
 						}
 					}
 
@@ -163,14 +131,14 @@ class GuildCollection extends Collection {
 	 * Fired when a web update is received
 	 * @param {String} id Guild ID
 	 */
-	// guildUpdate(id) {
-	// 	const guild = this.client.guilds.get(id);
-	// 	if (!guild) return;
+	guildUpdate(id) {
+		const guild = this._client.guilds.get(id);
+		if (!guild) return;
 
-	// 	logger.debug(`Web update for guild: ${id}`);
+		logger.debug(`Web update for guild: ${id}`);
 
-	// 	this.fetch(id).catch(err => logger.error(err));
-	// }
+		this.fetch(id).catch(err => logger.error(err));
+	}
 
 	/**
 	 * Wrapper to update guild config
@@ -180,45 +148,32 @@ class GuildCollection extends Collection {
 	 * @returns {Promise}
 	 */
 	update(id, update, ...args) {
-		if (update.$set) {
-			const serverlistColl = this.rnet.db.collection('serverlist_store');
-			let serverlistUpdate = false;
-			if (update.$set.iconURL) {
-				serverlistUpdate = serverlistUpdate || {};
-				serverlistUpdate.iconURL = update.$set.iconURL;
-			}
+		return Server.update({ _id: id }, update, ...args)
+			.then(() => this.postUpdate(id));
+	}
 
-			if (update.$set.deleted === true) {
-				serverlistUpdate = serverlistUpdate || {};
-				serverlistUpdate.markedForDeletionAt = Date.now();
-			}
-
-			if (update.$set.name) {
-				serverlistUpdate = serverlistUpdate || {};
-				serverlistUpdate.name = update.$set.name;
-			}
-
-			if (update.$set.memberCount) {
-				serverlistUpdate = serverlistUpdate || {};
-				serverlistUpdate.memberCount = update.$set.memberCount;
-			}
-
-			if (serverlistUpdate) {
-				serverlistColl.update({ id }, { $set: serverlistUpdate });
-			}
-
-			if (update.$set.deleted === false) {
-				serverlistColl.update({ id }, { $unset: { markedForDeletionAt: 1 } });
-			}
+	/**
+	 * Post update to shard managers
+	 * @param {String} guildId Guild ID
+	 * @returns {Promise}
+	 */
+	postUpdate(guildId) {
+		if (!this.globalConfig || !this.globalConfig.webhooks) {
+			return Promise.resolve();
 		}
 
-		try {
-			const result = models.Server.update({ _id: id }, update, ...args);
-			this.rnet.redis.publish('guildConfig', id);
-			return result;
-		} catch (err) {
-			logger.error(err);
-		}
+		return new Promise(resolve => {
+			const promises = [];
+			each(this.globalConfig.webhooks, (webhook, next) => {
+				promises.push(superagent
+					.post(`${webhook}/guildUpdate`)
+					.send(guildId)
+					.set('Accept', 'application/json'));
+				return next();
+			}, () => {
+				Promise.all(promises).finally(resolve);
+			});
+		});
 	}
 
 	// getGlobal() {
@@ -231,30 +186,25 @@ class GuildCollection extends Collection {
 	 * @param {Guild} guild Guild object
 	 */
 	async guildCreated(guild) {
-		// if (this.config.handleRegion && !utils.regionEnabled(guild, this.config) && guild.id !== this.config.rnetGuild) {
-		// 	return this.client.uncacheGuild(guild.id);
+		// if (this._config.handleRegion && !utils.regionEnabled(guild, this._config) && guild.id !== this._config.rnetGuild) {
+		// 	return this._client.uncacheGuild(guild.id);
 		// }
 
 		logger.info(`Connected to server: ${guild.id} with ${guild.channels.size} channels and ${guild.members.size} members | ${guild.name}`);
 
 		try {
-			var doc = await models.Server.findOne({ _id: guild.id }).lean().exec();
+			var doc = await Server.findOne({ _id: guild.id }).exec();
 			if (!doc) {
 				return this.registerGuild(guild, true);
 			}
 
-			if (this.config.isPremium && !doc.isPremium) {
-				this.postWebhook(premiumWebhook, { embeds: [{ title: 'Non-premium Guild Create', description: `Leaving Guild ${guild.id}`, color: 16729871 }] });
-				return this.client.leaveGuild(guild.id);
-			}
-
-			await this.update(guild.id, { $set: { deleted: false } }, { multi: true });
+			await this.update(guild.id, { deleted: false }, { multi: true });
 			this.set(doc._id, doc);
 		} catch (err) {
 			return logger.error(err);
 		}
 
-		if (this.config.isPremium && !doc.premiumInstalled) {
+		if (this._config.isPremium && !doc.premiumInstalled) {
 			doc.premiumInstalled = true;
 			this.set(doc._id, doc);
 			this.update(doc._id, { $set: { premiumInstalled: true } }).catch(err => logger.error(err));
@@ -270,7 +220,7 @@ class GuildCollection extends Collection {
 	async guildDeleted(guild) {
 		if (guild.unavailable) return;
 
-		if (this.config.isPremium) {
+		if (this._config.isPremium) {
 			var guildConfig = await this.getOrFetch(guild.id);
 			if (!guildConfig || !guildConfig.isPremium) return;
 			if (guildConfig.isPremium && guildConfig.premiumInstalled) {
@@ -280,7 +230,7 @@ class GuildCollection extends Collection {
 			return;
 		}
 
-		this.update(guild.id, { $set: { deleted: true, deletedAt: new Date() } })
+		this.update(guild.id, { deleted: true, deletedAt: new Date() })
 			.catch(err => logger.error(err));
 	}
 
@@ -289,20 +239,14 @@ class GuildCollection extends Collection {
 	 * @param  {Guild} guild Guild object
 	 */
 	registerGuild(guild, newGuild) {
-		if (!guild || !guild.id) {
-			return;
-		}
-
-		if (this._registering.has(guild.id)) {
-			return;
-		}
+		if (!guild || !guild.id) return;
+		if (this._registering.has(guild.id)) return;
 
 		this._registering.add(guild.id);
 
 		let doc = {
 			_id: guild.id,
-			longId: guild.id,
-			clientID: this.config.clientID,
+			clientID: this._config.clientID,
 			name: guild.name,
 			iconURL: guild.iconURL,
 			ownerID: guild.ownerID,
@@ -316,7 +260,7 @@ class GuildCollection extends Collection {
 
 		logger.info(`Registering guild: ${guild.id} ${guild.name}`);
 
-		if (newGuild && !this.config.isPremium) {
+		if (newGuild && !this._config.isPremium) {
 			this.dmOwner(guild);
 		}
 
@@ -354,12 +298,6 @@ class GuildCollection extends Collection {
 		});
 	}
 
-	setActive(guild, time) {
-		guild.lastActive = time;
-		this.rnet.redis.hset(`guild_activity:${this.config.client.id}:${this.config.clientOptions.maxShards}:${guild.shard.id}`, guild.id, time)
-			.catch(() => null);
-	}
-
 	/**
 	 * Attempt to send a DM to guild owner
 	 * @param {Guild} guild Guild object
@@ -368,7 +306,7 @@ class GuildCollection extends Collection {
 	 */
 	async sendDM(guild, content) {
 		try {
-			var channel = await this.client.getDMChannel(guild.ownerID);
+			var channel = await this._client.getDMChannel(guild.ownerID);
 		} catch (err) {
 			logger.error(err);
 			return Promise.reject(err);
@@ -378,7 +316,7 @@ class GuildCollection extends Collection {
 			return Promise.reject('Channel is undefined or null.');
 		}
 
-		this.client.createMessage(channel, content).catch(() => false);
+		utils.sendMessage(channel, content).catch(() => false);
 	}
 
 	/**
@@ -386,8 +324,8 @@ class GuildCollection extends Collection {
 	 * @param {Guild} guild Guild
 	 */
 	dmOwner(guild) {
-		if (this.config.test || this.config.beta) return;
-		if (this.config.handleRegion && !utils.regionEnabled(guild, this.config)) return;
+		if (this._config.test || this._config.beta) return;
+		if (this._config.handleRegion && !utils.regionEnabled(guild, this._config)) return;
 
 		let msgArray = [];
 
@@ -403,21 +341,8 @@ class GuildCollection extends Collection {
 			.then(() => logger.debug('Successful DM to owner'))
 			.catch(() => {
 				if (guild.memberCount > 70) return;
-				this.client.createMessage(guild.defaultChannel, msgArray.join('\n'));
+				utils.sendMessage(guild.defaultChannel, msgArray.join('\n'));
 			});
-	}
-
-	postWebhook(webhook, payload) {
-		return new Promise((resolve, reject) =>
-			axios.post(webhook, {
-				headers: {
-					Accept: 'application/json',
-					'Content-Type': 'application/json',
-				},
-				...payload,
-			})
-			.then(resolve)
-			.catch(reject));
 	}
 }
 

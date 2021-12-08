@@ -3,11 +3,10 @@
 const StatsD = require('hot-shots');
 const logger = require('./logger');
 const config = require('./config');
-
 const client = new StatsD({
-	host: config.statsd.host,
-	port: config.statsd.port,
-	prefix: config.statsd.prefix,
+	host: 'graphite.davinci.sh',
+	port: 4286,
+	prefix: config.statsdPrefix || 'rnet.prod.',
 });
 
 client.socket.on('error', err => {

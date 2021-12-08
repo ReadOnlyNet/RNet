@@ -1,6 +1,6 @@
 'use strict';
 
-const { utils } = require('@rnet.cf/rnet-core');
+const utils = require('../core/utils');
 
 module.exports = function messageDelete(dispatcher, message) {
 	if (!dispatcher.rnet.isReady || (message.author && message.author.bot)) return Promise.reject();
