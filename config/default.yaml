@@ -86,7 +86,7 @@ botspace:
 cleverbot:
   key: ''
 
-invite: https://discord.gg/9W6EG56
+invite: <INVITE_URL>
 avatar: https://cdn.rnet.cf/rnet-v3x1024.png
 
 rnetGuild: '538530739017220107'
@@ -96,9 +96,9 @@ testGuilds:
 - '538530739017220107'
 - '155149443606380545'
 
-shardWebhook: https://canary.discordapp.com/api/webhooks/263596728299683850/fygpIRg8pcD9nLPL2MxUjK8mupD6dnLfzA1eIwocoD_MnFzba1noE0sXY4XY_ZNfkPtt
+shardWebhook: <WEBHOOK>
 cluster:
-  webhookUrl: https://canary.discordapp.com/api/webhooks/263596728299683850/fygpIRg8pcD9nLPL2MxUjK8mupD6dnLfzA1eIwocoD_MnFzba1noE0sXY4XY_ZNfkPtt
+  webhookUrl<WEBHOOK>
 
 disableHeartbeat: true
 logCommands: false

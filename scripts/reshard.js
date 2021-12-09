@@ -80,7 +80,7 @@ createClusters({
 });
 
 createClusters({
-	clientId: '168274214858653696',
+	clientId: '<PREMIUM_CLIENT_ID>',
 	shardCount: 16,
 	clusterCount: 16,
 	env: 'premium',

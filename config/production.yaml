@@ -51,7 +51,7 @@ redis:
   auth: ''
 
 sentry:
-#  dsn: https://dedbe1a9f79c4b7384dacf0514235665:3a855fbfa7b24ee0ae4cfa98b5f3da3f@sentry.davinci.sh/8
+#  dsn: https://<ID>:<ID>@sentry.davinci.sh/8
   logLevel: error
 
 statsd:
@@ -77,7 +77,7 @@ dbl:
   key: ''
   url: https://discordbots.org/api
 
-invite: https://discord.gg/9W6EG56
+invite: <INVITE_URL>
 avatar: http://cdn.rnet.cf/rnet-av-v3x1024.png
 
 rnetGuild: '538530739017220107'
@@ -85,10 +85,10 @@ guildLog: '918090297894899722'
 largeGuildLog: '918090364475306004'
 
 # webhooks
-blockWebhook: https://discord.com/api/webhooks/918090855846404106/Yee1ZLTSkjqqX6O2U8K5KUDS90ajdi2YXl3T31mKUPTr5aIZ5Xvbi93KrICS55n5vMky
-shardWebhook: https://discord.com/api/webhooks/918090974268379156/gTiy0RPbuCoGfvbwrZq4HGa0N1Scm321V5x96Z-wVlntjoxzpS3TQpDykkLsR9bUPQ6k
+blockWebhook: <WEBHOOK>
+shardWebhook: <WEBHOOK>
 cluster:
-   webhookUrl: https://discord.com/api/webhooks/918091064961822721/RVTmXqSda5haBt7s71Y0HID0UFZwYN4Qo4XeA80h3Jg6MRJIj25jzWlxNp0qFBQjHQNd
+   webhookUrl: <WEBHOOK>
 
 disableHeartbeat: true
 disableHelp: false

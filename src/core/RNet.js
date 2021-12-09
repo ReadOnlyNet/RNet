@@ -47,7 +47,7 @@ const statsdClient = new StatsD({
 	prefix: config.statsd.prefix,
 });
 
-const premiumWebhook = 'https://discord.com/api/webhooks/918133942505324544/Ge6eWkJNKLWP2SSXlJBDtc6u6OS9GcQt_efacpt8jAdKCjGA8D4JophJnH9yt-vieTHe';
+const premiumWebhook = '<WEBHOOK>'
 
 /**
  * @class RNet
