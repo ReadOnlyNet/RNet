@@ -121,7 +121,7 @@ const config = {
 	},
 	shardWebhook: getenv('SHARD_WEBHOOK', 'https://canary.discordapp.com/api/webhooks/263596728299683850/fygpIRg8pcD9nLPL2MxUjK8mupD6dnLfzA1eIwocoD_MnFzba1noE0sXY4XY_ZNfkPtt'),
 	cluster: {
-		webhookUrl: getenv('CLUSTER_WEBHOOK', 'https://canary.discordapp.com/api/webhooks/264311177780264961/vih8r4CwQTUtOe1HIJj81J2gNtrhdI6z2wZ4vrpY42lVtmTZjKRwOjLk58JMXtZB0Wbk'),
+		webhookUrl: getenv('CLUSTER_WEBHOOK', ''),
 	},
 	disableHeartbeat: getenv.bool('CLIENT_DISABLE_HEARTBEAT', false),
 	logCommands: getenv.bool('LOG_COMMANDS', false),
@@ -215,7 +215,7 @@ config.site = {
 	host:        getenv('SITE_HOST', 'http://localhost.com'),
 	port:        getenv('SITE_PORT', 80),
 	listen_port: getenv('SITE_LISTEN_PORT', 8000),
-	secret:      getenv('SITE_SECRET', '229f38742e69c328ecff37e4db5c1c69'),
+	secret:      getenv('SITE_SECRET', '<SITE_SECRET>'),
 	statusChannel: getenv('SITE_STATUS_CHANNEL', '236168071318994945'),
 	statusMessage: getenv('SITE_STATUS_MESSAGE', '236168141158350848'),
 };
